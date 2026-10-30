@@ -241,6 +241,9 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         const val DEDUPLICATION_RADIUS_METERS = 35.0
         const val DEDUPLICATION_DIRECTION_CONFLICT_DEGREES = 45.0
 
+        // Constante de Tolerância do Cone de Bloqueio da Blacklist Vetorial (Fase 9.2)
+        const val BLACKLIST_CONE_TOLERANCE_DEGREES = 60.0
+
         // Timeout de sinal do GPS (10.000ms tolerante a desvios urbanos sem perder túneis)
         const val GPS_TIMEOUT_MS = 10_000L
 
@@ -434,16 +437,64 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         }
 
         /**
+         * Fase 9.2: Filtro de Blacklist Vetorial Direcional.
+         *
+         * Busca todos os bloqueios associados ao radarId dentro de bannedApproaches.
+         * Cada bloqueio é salvo no formato "${radarId}_${bannedBearing}" (ou "${radarId}" legado).
+         *
+         * Se houver bloqueios registrados para aquele ID:
+         * - Calcula a diferença angular entre o vehicleBearing (direção atual do carro) e o bannedBearing gravado:
+         *   var angleDiff = abs(currentBearing - bannedBearing) % 360.0
+         *   if (angleDiff > 180.0) angleDiff = 360.0 - angleDiff
+         *
+         * Regra do Cone de Bloqueio:
+         * - Se angleDiff <= 60 graus: o carro está vindo pelo mesmo sentido que o motorista baniu anteriormente.
+         *   Ignore o radar (retorna true).
+         * - Se for maior que 60 graus: o carro está vindo do eixo oposto ou de uma via transversal.
+         *   O bloqueio não se aplica; processe o alerta normalmente (retorna false).
+         */
+        fun isApproachBanned(
+            radarId: Long,
+            vehicleBearing: Float?,
+            bannedApproaches: Set<String>,
+            toleranceDegrees: Double = BLACKLIST_CONE_TOLERANCE_DEGREES
+        ): Boolean {
+            val prefix = "${radarId}_"
+            val idStr = radarId.toString()
+            val matchingEntries = bannedApproaches.filter { it == idStr || it.startsWith(prefix) }
+            if (matchingEntries.isEmpty()) return false
+
+            val currentBearing = vehicleBearing?.toDouble() ?: return matchingEntries.any { it == idStr }
+
+            for (entry in matchingEntries) {
+                if (entry == idStr) {
+                    // Bloqueio legado sem vetor
+                    return true
+                }
+                val bannedBearing = entry.removePrefix(prefix).toDoubleOrNull()
+                if (bannedBearing != null) {
+                    var angleDiff = abs(currentBearing - bannedBearing) % 360.0
+                    if (angleDiff > 180.0) angleDiff = 360.0 - angleDiff
+                    if (angleDiff <= toleranceDegrees) {
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+
+        /**
          * Verifica se o radar deve ser filtrado/ignorado devido a:
-         * 1. Blacklist Local: radar.id presente no conjunto de IDs banidos pelo usuário (Fase 9).
+         * 1. Blacklist Vetorial Direcional: vetor de aproximação banido com tolerância de 60° (Fase 9.2).
          * 2. Bloqueio Global do OSM: blockOsmRadars == true e radar.source == "OSM" (Fase 9).
          */
         fun shouldIgnoreRadar(
             radar: RadarEntity,
             blockOsmRadars: Boolean = false,
-            blacklistedIds: Set<String> = emptySet()
+            blacklistedIds: Set<String> = emptySet(),
+            vehicleBearing: Float? = null
         ): Boolean {
-            if (blacklistedIds.contains(radar.id.toString())) {
+            if (isApproachBanned(radar.id, vehicleBearing, blacklistedIds)) {
                 return true
             }
             if (blockOsmRadars && radar.source?.equals("OSM", ignoreCase = true) == true) {
@@ -716,31 +767,42 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     }
 
     /**
-     * Pega o ID do closestRadar atual, chama o preferencesManager.banRadar,
-     * e em seguida força _closestRadar.value = null para apagar a janela instantaneamente (Fase 9).
+     * Fase 9.2: Ação de Banimento com Vetor Direcional.
+     * Captura o location.bearing atual do GPS no milissegundo do clique no botão "X",
+     * compõe a chave "${radarId}_${bearing}" e salva no PreferencesManager,
+     * forçando o desaparecimento imediato da janela flutuante.
      */
     fun banCurrentRadar() {
         val currentNearby = _closestRadar.value ?: return
         val radarId = currentNearby.radar.id
-        preferencesManager.banRadar(radarId)
+
+        // Captura o heading/bearing atual do veículo no milissegundo do clique
+        val currentBearing = lastValidBearing ?: _currentLocation.value?.let { loc ->
+            if (loc.hasBearing() && loc.bearing != 0.0f) loc.bearing else null
+        } ?: 0.0f
+
+        preferencesManager.banApproach(radarId, currentBearing)
         _nearbyRadars.value = _nearbyRadars.value.filter { it.radar.id != radarId }
         _closestRadar.value = null
         Toast.makeText(this@RadarOverlayService, "Radar movido para a Blacklist", Toast.LENGTH_SHORT).show()
-        Log.i(TAG, "Radar $radarId banido com sucesso via banCurrentRadar(). Janela flutuante apagada instantaneamente.")
+        Log.i(TAG, "Radar $radarId banido no vetor direcional ${currentBearing.toInt()}° via banCurrentRadar(). Janela flutuante apagada instantaneamente.")
     }
 
     /**
-     * Adiciona o ID do radar à Blacklist local e remove imediatamente o alerta da tela (Fase 9).
+     * Adiciona o radar com seu vetor à Blacklist local e remove imediatamente o alerta da tela (Fase 9.2).
      */
-    fun blacklistRadar(radarId: Long) {
-        preferencesManager.banRadar(radarId)
+    fun blacklistRadar(radarId: Long, bearing: Float? = null) {
+        val currentBearing = bearing ?: lastValidBearing ?: _currentLocation.value?.let { loc ->
+            if (loc.hasBearing() && loc.bearing != 0.0f) loc.bearing else null
+        } ?: 0.0f
+        preferencesManager.banApproach(radarId, currentBearing)
         val updatedNearby = _nearbyRadars.value.filter { it.radar.id != radarId }
         _nearbyRadars.value = updatedNearby
         val newClosest = updatedNearby.firstOrNull()
         _closestRadar.value = newClosest
         _closestRadarAlertDistance.value = newClosest?.alertDistanceMeters ?: PreferencesManager.DEFAULT_DIST_HIGHWAY.toFloat()
         Toast.makeText(this@RadarOverlayService, "Radar movido para a Blacklist", Toast.LENGTH_SHORT).show()
-        Log.i(TAG, "Radar $radarId adicionado à Blacklist local com sucesso e ocultado da tela.")
+        Log.i(TAG, "Radar $radarId banido no vetor direcional ${currentBearing.toInt()}° adicionado à Blacklist local.")
     }
 
     /**
@@ -1587,9 +1649,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         val distExpress = preferencesManager.distExpress
         val distHighway = preferencesManager.distHighway
 
-        // Fase 9: Filtro Anti-Falsos Positivos (OSM e Blacklist)
+        // Fase 9 e 9.2: Filtro Anti-Falsos Positivos (OSM e Blacklist Vetorial Direcional)
         val blockOsm = preferencesManager.blockOsmRadars
-        val blacklistedIds = preferencesManager.blacklistedRadarIds
+        val bannedApproaches = preferencesManager.bannedApproaches
+        val vehicleBearingForCheck = effectiveVehicleBearing ?: if (location.hasBearing() && location.bearing != 0.0f) location.bearing else null
 
         _currentLocation.value = location
         _currentSpeedKmh.value = speedKmh
@@ -1602,8 +1665,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         var shouldTriggerSound = false
 
         for (radar in candidates) {
-            // Fase 9: Primeira regra de filtro - o app deve tratar radares banidos como se fossem invisíveis
-            if (preferencesManager.isRadarBanned(radar.id)) {
+            // Fase 9.2: Primeira regra de filtro - Blacklist Vetorial Direcional (Cone de Bloqueio de 60°)
+            if (isApproachBanned(radar.id, vehicleBearingForCheck, bannedApproaches)) {
                 continue
             }
 
@@ -1708,7 +1771,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         val distHighway = customDistHighway ?: if (::preferencesManager.isInitialized) preferencesManager.distHighway else PreferencesManager.DEFAULT_DIST_HIGHWAY
 
         val blockOsm = customBlockOsm ?: if (::preferencesManager.isInitialized) preferencesManager.blockOsmRadars else true
-        val blacklistedIds = customBlacklistedIds ?: if (::preferencesManager.isInitialized) preferencesManager.blacklistedRadarIds else emptySet()
+        val bannedApproaches = customBlacklistedIds ?: if (::preferencesManager.isInitialized) preferencesManager.bannedApproaches else emptySet()
 
         // Caching Espacial em RAM (Anti-Superaquecimento): itera apenas sobre cachedRadars
         val candidates = getOrUpdateCachedRadars(location)
@@ -1719,15 +1782,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         val effectiveVehicleBearing = lastValidBearing ?: if (location.hasBearing() && location.bearing != 0.0f) location.bearing else null
 
         for (radar in candidates) {
-            // Fase 9: Primeira regra de filtro - o app deve tratar radares banidos como se fossem invisíveis
-            val isBanned = if (customBlacklistedIds != null) {
-                customBlacklistedIds.contains(radar.id.toString())
-            } else if (::preferencesManager.isInitialized) {
-                preferencesManager.isRadarBanned(radar.id)
-            } else {
-                false
-            }
-            if (isBanned) {
+            // Fase 9.2: Primeira regra de filtro - Blacklist Vetorial Direcional (Cone de Bloqueio de 60°)
+            if (isApproachBanned(radar.id, effectiveVehicleBearing, bannedApproaches)) {
                 continue
             }
 

@@ -21,6 +21,7 @@ class PreferencesManagerTest {
         assertEquals(500, PreferencesManager.DEFAULT_DIST_HIGHWAY)
 
         assertEquals("block_osm_radars", PreferencesManager.KEY_BLOCK_OSM_RADARS)
+        assertEquals("banned_approaches", PreferencesManager.KEY_BANNED_APPROACHES)
         assertEquals("blacklisted_radar_ids", PreferencesManager.KEY_BLACKLISTED_RADAR_IDS)
     }
 
@@ -69,13 +70,68 @@ class PreferencesManagerTest {
 
     @Test
     fun testBlacklistedRadarLongIdsConversion() {
-        val stringSet = setOf("101", "202", "invalid", "303")
-        val longIds = stringSet.mapNotNull { it.toLongOrNull() }.toSet()
+        val stringSet = setOf("101", "202_180", "4092_185", "invalid", "303")
+        val longIds = stringSet.mapNotNull { entry ->
+            val idPart = if (entry.contains("_")) entry.substringBefore('_') else entry
+            idPart.toLongOrNull()
+        }.toSet()
 
-        assertEquals(3, longIds.size)
+        assertEquals(4, longIds.size)
         assert(longIds.contains(101L))
         assert(longIds.contains(202L))
+        assert(longIds.contains(4092L))
         assert(longIds.contains(303L))
         assertFalse(longIds.contains(999L))
+    }
+
+    @Test
+    fun testFase92DirectionalVectorBlacklistLogic() {
+        val bannedApproaches = mutableSetOf<String>()
+
+        fun banApproach(radarId: Long, bearing: Double) {
+            val norm = ((bearing.toInt() % 360) + 360) % 360
+            bannedApproaches.add("${radarId}_$norm")
+        }
+
+        fun isApproachBanned(radarId: Long, currentBearing: Double, tolerance: Double = 60.0): Boolean {
+            val prefix = "${radarId}_"
+            val idStr = radarId.toString()
+            val entries = bannedApproaches.filter { it == idStr || it.startsWith(prefix) }
+            if (entries.isEmpty()) return false
+
+            for (entry in entries) {
+                if (entry == idStr) return true
+                val bannedBearing = entry.removePrefix(prefix).toDoubleOrNull() ?: continue
+                var angleDiff = Math.abs(currentBearing - bannedBearing) % 360.0
+                if (angleDiff > 180.0) angleDiff = 360.0 - angleDiff
+                if (angleDiff <= tolerance) return true
+            }
+            return false
+        }
+
+        // Bane radar 4092 viajando para o Sul (185º)
+        banApproach(4092L, 185.0)
+        assert(bannedApproaches.contains("4092_185"))
+
+        // 1. Mesmo sentido exato (185°) -> BLOQUEADO
+        assert(isApproachBanned(4092L, 185.0))
+
+        // 2. Sentido dentro do cone de 60° (ex: 215°, diff 30° <= 60°) -> BLOQUEADO
+        assert(isApproachBanned(4092L, 215.0))
+
+        // 3. No limite de 60° (ex: 245°, diff 60.0° <= 60°) -> BLOQUEADO
+        assert(isApproachBanned(4092L, 245.0))
+
+        // 4. Fora do cone (ex: 246°, diff 61.0° > 60°) -> LIBERADO
+        assertFalse(isApproachBanned(4092L, 246.0))
+
+        // 5. Sentido Norte Oposto (5°, diff 180° > 60°) -> LIBERADO (Radar continua ativo no sentido Norte!)
+        assertFalse(isApproachBanned(4092L, 5.0))
+
+        // 6. Via transversal Leste (95°, diff 90° > 60°) -> LIBERADO
+        assertFalse(isApproachBanned(4092L, 95.0))
+
+        // 7. Outro radar não banido -> LIBERADO
+        assertFalse(isApproachBanned(9999L, 185.0))
     }
 }

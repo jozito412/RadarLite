@@ -337,6 +337,46 @@ class RadarOverlayServiceTest {
     }
 
     @Test
+    fun testFase92DirectionalVectorBlacklist() {
+        val radar = RadarEntity(
+            id = 4092L,
+            latitude = -25.4284,
+            longitude = -49.2733,
+            speedLimit = 60,
+            type = "FIXED",
+            source = "OSM"
+        )
+        // Banimento do vetor Sul (185º)
+        val approaches = setOf("4092_185")
+
+        // 1. Carro vindo a 185º (mesmo sentido) -> BLOQUEADO
+        assertTrue(RadarOverlayService.isApproachBanned(4092L, 185f, approaches))
+        assertTrue(RadarOverlayService.shouldIgnoreRadar(radar, blacklistedIds = approaches, vehicleBearing = 185f))
+
+        // 2. Carro vindo a 210º (diferença de 25º <= 60º do cone de bloqueio) -> BLOQUEADO
+        assertTrue(RadarOverlayService.isApproachBanned(4092L, 210f, approaches))
+        assertTrue(RadarOverlayService.shouldIgnoreRadar(radar, blacklistedIds = approaches, vehicleBearing = 210f))
+
+        // 3. Carro vindo no limite de 60º (245º - 185º = 60º) -> BLOQUEADO
+        assertTrue(RadarOverlayService.isApproachBanned(4092L, 245f, approaches))
+
+        // 4. Carro vindo fora do cone de 60º (246º - 185º = 61º) -> LIBERADO
+        assertFalse(RadarOverlayService.isApproachBanned(4092L, 246f, approaches))
+        assertFalse(RadarOverlayService.shouldIgnoreRadar(radar, blacklistedIds = approaches, vehicleBearing = 246f))
+
+        // 5. Carro no sentido Norte Oposto (5º, diferença de 180º) -> LIBERADO (alerta normal ativo para o sentido Norte!)
+        assertFalse(RadarOverlayService.isApproachBanned(4092L, 5f, approaches))
+        assertFalse(RadarOverlayService.shouldIgnoreRadar(radar, blacklistedIds = approaches, vehicleBearing = 5f))
+
+        // 6. Carro na via transversal (95º, diferença de 90º) -> LIBERADO
+        assertFalse(RadarOverlayService.isApproachBanned(4092L, 95f, approaches))
+        assertFalse(RadarOverlayService.shouldIgnoreRadar(radar, blacklistedIds = approaches, vehicleBearing = 95f))
+
+        // 7. Radar diferente (ex: ID 9999) -> LIBERADO
+        assertFalse(RadarOverlayService.isApproachBanned(9999L, 185f, approaches))
+    }
+
+    @Test
     fun testFase10AreClonesConditions() {
         // Base radar na Praça Tiradentes, Curitiba (-25.4284, -49.2733)
         val baseRadar = RadarEntity(

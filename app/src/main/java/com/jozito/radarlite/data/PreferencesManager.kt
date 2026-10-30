@@ -2,6 +2,8 @@ package com.jozito.radarlite.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * Gerenciador de preferências do usuário persistidas com SharedPreferences.
@@ -123,40 +125,112 @@ class PreferencesManager(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_BLOCK_OSM_RADARS, value).apply()
 
     /**
-     * Conjunto de IDs de radares banidos localmente pelo usuário (Fase 9).
+     * Conjunto de abordagens de radares banidos localmente pelo usuário com vetor direcional (Fase 9.2).
+     * Formato de cada item: "${radarId}_${bearing}" (Ex: "4092_185").
      */
-    val blacklistedRadarIds: Set<String>
-        get() = prefs.getStringSet(KEY_BLACKLISTED_RADAR_IDS, emptySet()) ?: emptySet()
+    val bannedApproaches: Set<String>
+        get() = prefs.getStringSet(KEY_BANNED_APPROACHES, emptySet()) ?: emptySet()
 
     /**
-     * Retorna o conjunto de IDs banidos convertidos para Long (Fase 9.1).
+     * Mantém compatibilidade com contagens e interfaces que consultam o conjunto da blacklist.
+     */
+    val blacklistedRadarIds: Set<String>
+        get() = bannedApproaches
+
+    /**
+     * Retorna o conjunto de IDs banidos convertidos para Long (Fase 9.1 / 9.2).
      */
     fun getBlacklistedRadarLongIds(): Set<Long> {
-        return blacklistedRadarIds.mapNotNull { it.toLongOrNull() }.toSet()
+        return bannedApproaches.mapNotNull { entry ->
+            val idPart = if (entry.contains("_")) entry.substringBefore('_') else entry
+            idPart.toLongOrNull()
+        }.toSet()
     }
 
     /**
-     * Adiciona o ID de um radar à Blacklist local (Fase 9).
+     * Retorna a lista de azimutes/direções banidos para um dado radarId.
      */
-    fun banRadar(radarId: Long) {
-        banRadar(radarId.toString())
+    fun getBannedBearingsForRadar(radarId: Long): List<Double> {
+        val prefix = "${radarId}_"
+        return bannedApproaches
+            .filter { it.startsWith(prefix) }
+            .mapNotNull { it.removePrefix(prefix).toDoubleOrNull() }
+    }
+
+    /**
+     * Bane um radar associado ao vetor direcional de aproximação do veículo (Fase 9.2).
+     * Formato: "${radarId}_${bearing}" (Ex: "4092_185").
+     */
+    fun banApproach(radarId: Long, bearing: Double) {
+        val normBearing = ((bearing.roundToInt() % 360) + 360) % 360
+        val entry = "${radarId}_${normBearing}"
+        val current = bannedApproaches.toMutableSet()
+        current.add(entry)
+        prefs.edit().putStringSet(KEY_BANNED_APPROACHES, current).apply()
+    }
+
+    fun banApproach(radarId: Long, bearing: Float) {
+        banApproach(radarId, bearing.toDouble())
+    }
+
+    fun banRadar(radarId: Long, bearing: Float = 0f) {
+        banApproach(radarId, bearing)
     }
 
     fun banRadar(radarId: String) {
-        val current = blacklistedRadarIds.toMutableSet()
-        current.add(radarId)
-        prefs.edit().putStringSet(KEY_BLACKLISTED_RADAR_IDS, current).apply()
+        val longId = radarId.toLongOrNull()
+        if (longId != null) {
+            banApproach(longId, 0.0)
+        } else {
+            val current = bannedApproaches.toMutableSet()
+            current.add(radarId)
+            prefs.edit().putStringSet(KEY_BANNED_APPROACHES, current).apply()
+        }
     }
 
     /**
-     * Verifica se o radar está banido na Blacklist local (Fase 9).
+     * Verifica se o radar está banido para o vetor direcional informado (Fase 9.2).
+     * Cone de Bloqueio padrão: 60 graus.
      */
-    fun isRadarBanned(radarId: Long): Boolean {
-        return isRadarBanned(radarId.toString())
+    fun isApproachBanned(radarId: Long, currentBearing: Double, toleranceDegrees: Double = 60.0): Boolean {
+        val idStr = radarId.toString()
+        val prefix = "${radarId}_"
+        val matchingEntries = bannedApproaches.filter { it == idStr || it.startsWith(prefix) }
+        if (matchingEntries.isEmpty()) return false
+
+        for (entry in matchingEntries) {
+            if (entry == idStr) {
+                // Bloqueio legado total por ID
+                return true
+            }
+            val bannedBearing = entry.removePrefix(prefix).toDoubleOrNull()
+            if (bannedBearing != null) {
+                var angleDiff = abs(currentBearing - bannedBearing) % 360.0
+                if (angleDiff > 180.0) angleDiff = 360.0 - angleDiff
+                if (angleDiff <= toleranceDegrees) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    fun isApproachBanned(radarId: Long, currentBearing: Float, toleranceDegrees: Double = 60.0): Boolean {
+        return isApproachBanned(radarId, currentBearing.toDouble(), toleranceDegrees)
+    }
+
+    fun isRadarBanned(radarId: Long, currentBearing: Float? = null): Boolean {
+        if (currentBearing != null) {
+            return isApproachBanned(radarId, currentBearing)
+        }
+        val idStr = radarId.toString()
+        val prefix = "${radarId}_"
+        return bannedApproaches.any { it == idStr || it.startsWith(prefix) }
     }
 
     fun isRadarBanned(radarId: String): Boolean {
-        return blacklistedRadarIds.contains(radarId)
+        val longId = radarId.toLongOrNull()
+        return if (longId != null) isRadarBanned(longId) else bannedApproaches.contains(radarId)
     }
 
     // Métodos utilitários e aliases para compatibilidade
@@ -168,23 +242,35 @@ class PreferencesManager(context: Context) {
     fun unbanRadar(radarId: String) = removeBlacklistedRadarId(radarId)
 
     /**
-     * Remove um radar da Blacklist local.
+     * Remove um radar da Blacklist local (remove todos os vetores associados ao ID).
      */
     fun removeBlacklistedRadarId(radarId: Long) {
-        removeBlacklistedRadarId(radarId.toString())
+        val idStr = radarId.toString()
+        val prefix = "${radarId}_"
+        val current = bannedApproaches.toMutableSet()
+        current.removeAll { it == idStr || it.startsWith(prefix) }
+        prefs.edit().putStringSet(KEY_BANNED_APPROACHES, current).apply()
     }
 
     fun removeBlacklistedRadarId(radarId: String) {
-        val current = blacklistedRadarIds.toMutableSet()
-        current.remove(radarId)
-        prefs.edit().putStringSet(KEY_BLACKLISTED_RADAR_IDS, current).apply()
+        val longId = radarId.toLongOrNull()
+        if (longId != null) {
+            removeBlacklistedRadarId(longId)
+        } else {
+            val current = bannedApproaches.toMutableSet()
+            current.remove(radarId)
+            prefs.edit().putStringSet(KEY_BANNED_APPROACHES, current).apply()
+        }
     }
 
     /**
      * Limpa toda a Blacklist de radares banidos.
      */
     fun clearBlacklistedRadars() {
-        prefs.edit().remove(KEY_BLACKLISTED_RADAR_IDS).apply()
+        prefs.edit()
+            .remove(KEY_BANNED_APPROACHES)
+            .remove(KEY_BLACKLISTED_RADAR_IDS)
+            .apply()
     }
 
     companion object {
@@ -210,9 +296,10 @@ class PreferencesManager(context: Context) {
         const val DEFAULT_DIST_EXPRESS = 350
         const val DEFAULT_DIST_HIGHWAY = 500
 
-        // Fase 9: Filtro Anti-Falsos Positivos (OSM e Blacklist)
+        // Fase 9 e 9.2: Filtro Anti-Falsos Positivos e Blacklist Vetorial Direcional
         const val KEY_BLOCK_OSM_RADARS = "block_osm_radars"
-        const val KEY_BLACKLISTED_RADAR_IDS = "blacklisted_radar_ids"
+        const val KEY_BANNED_APPROACHES = "banned_approaches"
+        const val KEY_BLACKLISTED_RADAR_IDS = "blacklisted_radar_ids" // mantido para migração limpa
 
         @Volatile
         private var INSTANCE: PreferencesManager? = null

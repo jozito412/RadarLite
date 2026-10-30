@@ -1660,6 +1660,10 @@ fun BlacklistManagerDialog(
                             val sourceLabel = radar.source?.ifBlank { "OSM" } ?: "OSM"
                             val (_, typeLabel) = RadarOverlayService.getRadarTypeInfo(radar.type)
                             val displayTitle = "$sourceLabel - $typeLabel ${radar.speedLimit} km/h"
+                            val bannedBearings = prefs.getBannedBearingsForRadar(radar.id)
+                            val directionSubtitle = if (bannedBearings.isNotEmpty()) {
+                                " • Sentido(s): ${bannedBearings.joinToString { "${it.toInt()}°" }}"
+                            } else ""
 
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1682,7 +1686,7 @@ fun BlacklistManagerDialog(
                                             fontSize = 14.sp
                                         )
                                         Text(
-                                            text = "ID: ${radar.id} • Lat: ${String.format(Locale.US, "%.4f", radar.latitude)}, Lng: ${String.format(Locale.US, "%.4f", radar.longitude)}",
+                                            text = "ID: ${radar.id}$directionSubtitle • Lat: ${String.format(Locale.US, "%.4f", radar.latitude)}, Lng: ${String.format(Locale.US, "%.4f", radar.longitude)}",
                                             fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
                                         )
