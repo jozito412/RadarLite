@@ -231,6 +231,26 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         const val ACTION_START = "ACTION_START"
         const val ACTION_STOP = "ACTION_STOP"
 
+        // Ações e extras para transmissão de estado para Launchers parceiros (ex: CoolantHUD)
+        const val ACTION_STATE_CHANGED = "com.jozito412.radarlite.ACTION_STATE_CHANGED"
+        const val EXTRA_IS_RUNNING = "is_running"
+
+        /**
+         * Emite um Broadcast anunciando a mudança de estado de execução do serviço.
+         * Usado para sincronização de via dupla com Launchers externos (ex: CoolantHUD).
+         */
+        fun broadcastState(context: Context, isRunning: Boolean) {
+            try {
+                val intent = Intent(ACTION_STATE_CHANGED).apply {
+                    putExtra(EXTRA_IS_RUNNING, isRunning)
+                }
+                context.sendBroadcast(intent)
+                Log.d(TAG, "Broadcast de estado emitido: $ACTION_STATE_CHANGED ($EXTRA_IS_RUNNING = $isRunning)")
+            } catch (e: Exception) {
+                Log.e(TAG, "Erro ao emitir broadcast de estado", e)
+            }
+        }
+
         // Intervalo de cooldown para não repetir o alerta sonoro para o mesmo radar (15s)
         const val COOLDOWN_DURATION_MS = 15_000L
 
@@ -673,6 +693,9 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         startAsForegroundService()
         setupLocationCallback()
         setupOverlayWindow()
+
+        _isRunning.value = true
+        broadcastState(applicationContext, true)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -680,6 +703,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
         if (intent?.action == ACTION_STOP) {
             _isRunning.value = false
+            broadcastState(applicationContext, false)
             _isGpsLost.value = false
             _closestRadarAlertDistance.value = PreferencesManager.DEFAULT_DIST_HIGHWAY.toFloat()
             stopGpsWatchdog()
@@ -688,6 +712,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         }
 
         _isRunning.value = true
+        broadcastState(applicationContext, true)
         startLocationUpdates()
 
         // Garante que o overlay seja inicializado se a permissão foi concedida após o onCreate
@@ -702,6 +727,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         super.onDestroy()
         Log.d(TAG, "Destruindo RadarOverlayService e liberando recursos")
         _isRunning.value = false
+        broadcastState(applicationContext, false)
         _isGpsLost.value = false
         _closestRadarAlertDistance.value = PreferencesManager.DEFAULT_DIST_HIGHWAY.toFloat()
         stopGpsWatchdog()

@@ -25,6 +25,7 @@ class AutostartReceiver : BroadcastReceiver() {
         // Ações customizadas para controle remoto por launchers ou apps externos (ex: CoolantHUD)
         const val ACTION_START = "com.jozito412.radarlite.ACTION_START"
         const val ACTION_STOP = "com.jozito412.radarlite.ACTION_STOP"
+        const val ACTION_REQUEST_STATE = "com.jozito412.radarlite.ACTION_REQUEST_STATE"
         const val ACTION_CUSTOM_START = ACTION_START
         const val ACTION_CUSTOM_STOP = ACTION_STOP
 
@@ -134,6 +135,14 @@ class AutostartReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
         Log.d(TAG, "Broadcast recebido: $action")
+
+        // Solicitação remota de status (Ping) por Launcher customizado (ex: CoolantHUD)
+        if (action == ACTION_REQUEST_STATE) {
+            val currentState = RadarOverlayService.isRunning.value
+            RadarOverlayService.broadcastState(context, currentState)
+            Log.d(TAG, "Solicitação de status ACTION_REQUEST_STATE atendida: is_running=$currentState.")
+            return
+        }
 
         val prefs = PreferencesManager.getInstance(context)
 

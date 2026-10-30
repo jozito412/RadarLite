@@ -551,5 +551,11 @@ class RadarOverlayServiceTest {
         assertFalse(RadarOverlayService.shouldIgnoreRadar(testRadarVector, blacklistedIds = globalBannedApproaches, vehicleBearing = 0f))
         assertFalse(RadarOverlayService.shouldIgnoreRadar(testRadarClean, blacklistedIds = globalBannedApproaches, vehicleBearing = 180f))
     }
+
+    @Test
+    fun testTwoWaySyncStateBroadcastConstants() {
+        assertEquals("com.jozito412.radarlite.ACTION_STATE_CHANGED", RadarOverlayService.ACTION_STATE_CHANGED)
+        assertEquals("is_running", RadarOverlayService.EXTRA_IS_RUNNING)
+    }
 }
 

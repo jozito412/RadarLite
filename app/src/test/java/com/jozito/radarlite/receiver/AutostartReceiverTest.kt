@@ -30,6 +30,7 @@ class AutostartReceiverTest {
 
         // Controle remoto por Launcher customizado (ex: CoolantHUD)
         assertEquals("com.jozito412.radarlite.ACTION_START", AutostartReceiver.ACTION_START)
+        assertEquals("com.jozito412.radarlite.ACTION_REQUEST_STATE", AutostartReceiver.ACTION_REQUEST_STATE)
         assertTrue(AutostartReceiver.isAutostartAction(AutostartReceiver.ACTION_START))
     }
 

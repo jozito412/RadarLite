@@ -58,9 +58,10 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
-                <!-- Ações para controle remoto via Launchers / CoolantHUD -->
+                <!-- Ações para controle remoto e sincronização de via dupla (Two-Way Sync) via Launchers / CoolantHUD -->
                 <action android:name="com.jozito412.radarlite.ACTION_START" />
                 <action android:name="com.jozito412.radarlite.ACTION_STOP" />
+                <action android:name="com.jozito412.radarlite.ACTION_REQUEST_STATE" />
             </intent-filter>
         </receiver>
     </application>
