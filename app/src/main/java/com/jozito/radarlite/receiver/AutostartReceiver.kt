@@ -26,6 +26,7 @@ class AutostartReceiver : BroadcastReceiver() {
         const val ACTION_START = "com.jozito412.radarlite.ACTION_START"
         const val ACTION_STOP = "com.jozito412.radarlite.ACTION_STOP"
         const val ACTION_REQUEST_STATE = "com.jozito412.radarlite.ACTION_REQUEST_STATE"
+        const val ACTION_WATCHDOG_WAKE = "com.jozito412.radarlite.ACTION_WATCHDOG_WAKE"
         const val ACTION_CUSTOM_START = ACTION_START
         const val ACTION_CUSTOM_STOP = ACTION_STOP
 
@@ -64,7 +65,8 @@ class AutostartReceiver : BroadcastReceiver() {
         fun isAutostartAction(action: String?): Boolean {
             return isIgnitionOrBootAction(action) ||
                     action == BluetoothDevice.ACTION_ACL_CONNECTED ||
-                    action == ACTION_START
+                    action == ACTION_START ||
+                    action == ACTION_WATCHDOG_WAKE
         }
 
         /**
@@ -175,7 +177,18 @@ class AutostartReceiver : BroadcastReceiver() {
 
         val prefs = PreferencesManager.getInstance(context)
 
-        // 2. Comandos remotos explícitos do Launcher CoolantHUD (atualizam a intenção do usuário - Fase 11)
+        // 2. Pulso de vida (Watchdog) enviado pelo Launcher (CoolantHUD) ao acender a tela após Deep Sleep
+        if (action == ACTION_WATCHDOG_WAKE) {
+            if (prefs.isServiceIntentionallyStopped) {
+                Log.d(TAG, "Pulso Watchdog recebido ($action), porém o serviço foi desligado intencionalmente pelo usuário (is_service_intentionally_stopped = true). Ignorando.")
+                return
+            }
+            Log.i(TAG, "Pulso Watchdog recebido ($action). Restaurando RadarOverlayService...")
+            startServiceSilently(context, action)
+            return
+        }
+
+        // 3. Comandos remotos explícitos do Launcher CoolantHUD (atualizam a intenção do usuário - Fase 11)
         if (action == ACTION_START) {
             prefs.isServiceIntentionallyStopped = false
             startServiceSilently(context, action)
@@ -187,7 +200,7 @@ class AutostartReceiver : BroadcastReceiver() {
             return
         }
 
-        // 3. Redundância de Ignição / Boot da Central Multimídia (Boot, QuickBoot, Screen On ou Power Connected)
+        // 4. Redundância de Ignição / Boot da Central Multimídia (Boot, QuickBoot, Screen On ou Power Connected)
         if (isIgnitionOrBootAction(action)) {
             // Fase 11: Se o usuário parou o serviço intencionalmente (via STOP), não liga sozinho ao religar o carro
             if (prefs.isServiceIntentionallyStopped) {
@@ -203,7 +216,7 @@ class AutostartReceiver : BroadcastReceiver() {
             return
         }
 
-        // 4. Conexão/Desconexão Bluetooth (Smartphones conectando/desconectando da Central Multimídia)
+        // 5. Conexão/Desconexão Bluetooth (Smartphones conectando/desconectando da Central Multimídia)
         val isBtAction = action == BluetoothDevice.ACTION_ACL_CONNECTED ||
                 action == BluetoothDevice.ACTION_ACL_DISCONNECTED ||
                 action == BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED ||

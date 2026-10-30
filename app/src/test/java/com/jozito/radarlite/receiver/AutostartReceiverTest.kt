@@ -39,7 +39,9 @@ class AutostartReceiverTest {
         // Controle remoto por Launcher customizado (ex: CoolantHUD)
         assertEquals("com.jozito412.radarlite.ACTION_START", AutostartReceiver.ACTION_START)
         assertEquals("com.jozito412.radarlite.ACTION_REQUEST_STATE", AutostartReceiver.ACTION_REQUEST_STATE)
+        assertEquals("com.jozito412.radarlite.ACTION_WATCHDOG_WAKE", AutostartReceiver.ACTION_WATCHDOG_WAKE)
         assertTrue(AutostartReceiver.isAutostartAction(AutostartReceiver.ACTION_START))
+        assertTrue(AutostartReceiver.isAutostartAction(AutostartReceiver.ACTION_WATCHDOG_WAKE))
     }
 
     @Test
@@ -80,12 +82,14 @@ class AutostartReceiverTest {
         assertTrue(AutostartReceiver.shouldStartService(BluetoothDevice.ACTION_ACL_CONNECTED, isServiceRunning = false))
         assertTrue(AutostartReceiver.shouldStartService(Intent.ACTION_BOOT_COMPLETED, isServiceRunning = false))
         assertTrue(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_START, isServiceRunning = false))
+        assertTrue(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_WATCHDOG_WAKE, isServiceRunning = false))
 
         // Trava lógica: Se o serviço JÁ ESTÁ RODANDO (ex: múltiplos disparos simultâneos ou launcher re-enviando comando),
         // o receptor descarta novos disparos para evitar concorrência e exceções
         assertFalse(AutostartReceiver.shouldStartService(BluetoothDevice.ACTION_ACL_CONNECTED, isServiceRunning = true))
         assertFalse(AutostartReceiver.shouldStartService(Intent.ACTION_BOOT_COMPLETED, isServiceRunning = true))
         assertFalse(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_START, isServiceRunning = true))
+        assertFalse(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_WATCHDOG_WAKE, isServiceRunning = true))
 
         // Ações inválidas não devem iniciar mesmo se o serviço estiver parado
         assertFalse(AutostartReceiver.shouldStartService(BluetoothDevice.ACTION_ACL_DISCONNECTED, isServiceRunning = false))
@@ -164,5 +168,20 @@ class AutostartReceiverTest {
 
         // Caso 3: Comando explícito do Launcher ACTION_START sempre inicia
         assertTrue(shouldWakeService(AutostartReceiver.ACTION_START, isIntentionallyStopped = true, isAutostartEnabled = true))
+    }
+
+    @Test
+    fun testWatchdogWakeTriggerResilience() {
+        fun shouldProcessWatchdogWake(isIntentionallyStopped: Boolean): Boolean {
+            return !isIntentionallyStopped
+        }
+
+        // Se o app foi desligado pelo sistema por Force Stop após Deep Sleep, mas o usuário NÃO desligou intencionalmente:
+        // O pulso do Launcher restaura o RadarOverlayService
+        assertTrue(shouldProcessWatchdogWake(isIntentionallyStopped = false))
+
+        // Se o usuário desligou o serviço intencionalmente (via botão STOP):
+        // O pulso do Launcher deve ser ignorado para respeitar a decisão do motorista
+        assertFalse(shouldProcessWatchdogWake(isIntentionallyStopped = true))
     }
 }

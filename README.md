@@ -57,6 +57,7 @@ Você pode baixar diretamente o instalador compilado da versão 1.0:
     - **Ligar Overlay:** Dispare um broadcast com a action `"com.jozito412.radarlite.ACTION_START"`.
     - **Desligar Overlay:** Dispare um broadcast com a action `"com.jozito412.radarlite.ACTION_STOP"`.
     - **Solicitar Status (Ping):** Dispare a action `"com.jozito412.radarlite.ACTION_REQUEST_STATE"`. O RadarLite responde instantaneamente transmitindo o status real.
+    - **Pulso de Vida Watchdog (Resiliência a Force Stop):** Launchers podem emitir `"com.jozito412.radarlite.ACTION_WATCHDOG_WAKE"` sempre que a tela acender após Deep Sleep prolongado. Se o serviço não foi intencionalmente desligado pelo usuário, ele é restaurado de forma segura e transparente.
     - **Broadcast de Estado (Pong / Eventos):** O RadarLite emite a action `"com.jozito412.radarlite.ACTION_STATE_CHANGED"` com o extra booleano `"is_running"` (`true`/`false`) sempre que o serviço é iniciado, encerrado (inclusive via Bluetooth/Ignição) ou quando solicitado pelo Launcher.
   - Possui trava lógica de concorrência (`startLock`) que evita inicializações duplicadas caso o serviço já esteja em execução.
 
