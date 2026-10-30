@@ -34,9 +34,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -68,7 +70,9 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -453,24 +457,40 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
          * - Se for maior que 60 graus: o carro está vindo do eixo oposto ou de uma via transversal.
          *   O bloqueio não se aplica; processe o alerta normalmente (retorna false).
          */
+        /**
+         * Fase 9.2 e 9.3: Filtro de Blacklist Híbrida (Vetor Direcional + Marreta Global).
+         *
+         * 1. Marreta Global (Fase 9.3):
+         *    Se bannedApproaches contiver "${radarId}_GLOBAL" (ou ID numérico puro),
+         *    o radar é ignorado incondicionalmente em TODAS as direções (retorna true).
+         *
+         * 2. Vetor Direcional (Fase 9.2):
+         *    Busca todos os bloqueios direcionais no formato "${radarId}_${bannedBearing}".
+         *    Calcula a diferença angular entre o vehicleBearing e o bannedBearing gravado:
+         *    - Se angleDiff <= 60 graus: o carro está vindo pelo mesmo sentido banido -> ignora (retorna true).
+         *    - Se angleDiff > 60 graus: o carro está em outro eixo -> alerta mantido (retorna false).
+         */
         fun isApproachBanned(
             radarId: Long,
             vehicleBearing: Float?,
             bannedApproaches: Set<String>,
             toleranceDegrees: Double = BLACKLIST_CONE_TOLERANCE_DEGREES
         ): Boolean {
-            val prefix = "${radarId}_"
             val idStr = radarId.toString()
-            val matchingEntries = bannedApproaches.filter { it == idStr || it.startsWith(prefix) }
+            val globalKey = "${radarId}_GLOBAL"
+
+            // Prioridade máxima: Marreta Global (Fase 9.3) ou bloqueio legado por ID
+            if (bannedApproaches.contains(globalKey) || bannedApproaches.contains(idStr)) {
+                return true
+            }
+
+            val prefix = "${radarId}_"
+            val matchingEntries = bannedApproaches.filter { it.startsWith(prefix) && it != globalKey }
             if (matchingEntries.isEmpty()) return false
 
-            val currentBearing = vehicleBearing?.toDouble() ?: return matchingEntries.any { it == idStr }
+            val currentBearing = vehicleBearing?.toDouble() ?: return false
 
             for (entry in matchingEntries) {
-                if (entry == idStr) {
-                    // Bloqueio legado sem vetor
-                    return true
-                }
                 val bannedBearing = entry.removePrefix(prefix).toDoubleOrNull()
                 if (bannedBearing != null) {
                     var angleDiff = abs(currentBearing - bannedBearing) % 360.0
@@ -767,42 +787,56 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     }
 
     /**
-     * Fase 9.2: Ação de Banimento com Vetor Direcional.
-     * Captura o location.bearing atual do GPS no milissegundo do clique no botão "X",
-     * compõe a chave "${radarId}_${bearing}" e salva no PreferencesManager,
-     * forçando o desaparecimento imediato da janela flutuante.
+     * Fase 9.3: Blacklist Híbrida (Vetor + Global via Long Press).
+     * - global == false (Toque Rápido): bane o radar apenas no vetor direcional atual do carro.
+     *   Chave: "${radarId}_${currentBearing}". Toast: "Radar banido neste sentido".
+     * - global == true (Toque Longo / Long Press): bane o radar globalmente em TODAS as direções.
+     *   Chave: "${radarId}_GLOBAL". Toast: "Radar banido em TODAS as direções".
      */
-    fun banCurrentRadar() {
+    fun banCurrentRadar(global: Boolean = false) {
         val currentNearby = _closestRadar.value ?: return
         val radarId = currentNearby.radar.id
 
-        // Captura o heading/bearing atual do veículo no milissegundo do clique
-        val currentBearing = lastValidBearing ?: _currentLocation.value?.let { loc ->
-            if (loc.hasBearing() && loc.bearing != 0.0f) loc.bearing else null
-        } ?: 0.0f
+        if (global) {
+            preferencesManager.banRadarGlobally(radarId)
+            Toast.makeText(this@RadarOverlayService, "Radar banido em TODAS as direções", Toast.LENGTH_SHORT).show()
+            Log.i(TAG, "Radar $radarId banido GLOBALMENTE via banCurrentRadar(global = true). Janela flutuante apagada instantaneamente.")
+        } else {
+            // Captura o heading/bearing atual do veículo no milissegundo do clique
+            val currentBearing = lastValidBearing ?: _currentLocation.value?.let { loc ->
+                if (loc.hasBearing() && loc.bearing != 0.0f) loc.bearing else null
+            } ?: 0.0f
+            preferencesManager.banApproach(radarId, currentBearing)
+            Toast.makeText(this@RadarOverlayService, "Radar banido neste sentido", Toast.LENGTH_SHORT).show()
+            Log.i(TAG, "Radar $radarId banido no vetor direcional ${currentBearing.toInt()}° via banCurrentRadar(global = false). Janela flutuante apagada instantaneamente.")
+        }
 
-        preferencesManager.banApproach(radarId, currentBearing)
         _nearbyRadars.value = _nearbyRadars.value.filter { it.radar.id != radarId }
         _closestRadar.value = null
-        Toast.makeText(this@RadarOverlayService, "Radar movido para a Blacklist", Toast.LENGTH_SHORT).show()
-        Log.i(TAG, "Radar $radarId banido no vetor direcional ${currentBearing.toInt()}° via banCurrentRadar(). Janela flutuante apagada instantaneamente.")
     }
 
     /**
-     * Adiciona o radar com seu vetor à Blacklist local e remove imediatamente o alerta da tela (Fase 9.2).
+     * Adiciona o radar com seu vetor ou globalmente à Blacklist local e remove imediatamente o alerta da tela (Fase 9.3).
      */
-    fun blacklistRadar(radarId: Long, bearing: Float? = null) {
-        val currentBearing = bearing ?: lastValidBearing ?: _currentLocation.value?.let { loc ->
-            if (loc.hasBearing() && loc.bearing != 0.0f) loc.bearing else null
-        } ?: 0.0f
-        preferencesManager.banApproach(radarId, currentBearing)
+    fun blacklistRadar(radarId: Long, bearing: Float? = null, global: Boolean = false) {
+        if (global) {
+            preferencesManager.banRadarGlobally(radarId)
+            Toast.makeText(this@RadarOverlayService, "Radar banido em TODAS as direções", Toast.LENGTH_SHORT).show()
+            Log.i(TAG, "Radar $radarId banido GLOBALMENTE.")
+        } else {
+            val currentBearing = bearing ?: lastValidBearing ?: _currentLocation.value?.let { loc ->
+                if (loc.hasBearing() && loc.bearing != 0.0f) loc.bearing else null
+            } ?: 0.0f
+            preferencesManager.banApproach(radarId, currentBearing)
+            Toast.makeText(this@RadarOverlayService, "Radar banido neste sentido", Toast.LENGTH_SHORT).show()
+            Log.i(TAG, "Radar $radarId banido no vetor direcional ${currentBearing.toInt()}°.")
+        }
+
         val updatedNearby = _nearbyRadars.value.filter { it.radar.id != radarId }
         _nearbyRadars.value = updatedNearby
         val newClosest = updatedNearby.firstOrNull()
         _closestRadar.value = newClosest
         _closestRadarAlertDistance.value = newClosest?.alertDistanceMeters ?: PreferencesManager.DEFAULT_DIST_HIGHWAY.toFloat()
-        Toast.makeText(this@RadarOverlayService, "Radar movido para a Blacklist", Toast.LENGTH_SHORT).show()
-        Log.i(TAG, "Radar $radarId banido no vetor direcional ${currentBearing.toInt()}° adicionado à Blacklist local.")
     }
 
     /**
@@ -848,8 +882,18 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                     val alertDistance = nearby.alertDistanceMeters
                     val isOverSpeed = speedState > speedLimit
 
+                    val haptic = LocalHapticFeedback.current
+
                     val onBanClick = {
-                        banCurrentRadar()
+                        banCurrentRadar(global = false)
+                    }
+                    val onBanLongClick = {
+                        try {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Haptic feedback não disponível", e)
+                        }
+                        banCurrentRadar(global = true)
                     }
 
                     if (!isOverSpeed) {
@@ -862,7 +906,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                             radarType = radar.type,
                             isDarkMode = isDarkMode,
                             source = radar.source,
-                            onBlacklistClick = onBanClick
+                            onBlacklistClick = onBanClick,
+                            onBlacklistLongClick = onBanLongClick
                         )
                     } else if (nearby.distanceMeters > (alertDistance / 2f)) {
                         // 2. Estado Vermelho Estático (Atenção - Alerta Inicial):
@@ -876,7 +921,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                             radarType = radar.type,
                             isDarkMode = isDarkMode,
                             source = radar.source,
-                            onBlacklistClick = onBanClick
+                            onBlacklistClick = onBanClick,
+                            onBlacklistLongClick = onBanLongClick
                         )
                     } else {
                         // 3. Estado Vermelho Agressivo (Perigo Iminente - Frenagem):
@@ -890,7 +936,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                             radarType = radar.type,
                             isDarkMode = isDarkMode,
                             source = radar.source,
-                            onBlacklistClick = onBanClick
+                            onBlacklistClick = onBanClick,
+                            onBlacklistLongClick = onBanLongClick
                         )
                     }
                 }
@@ -904,6 +951,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
      * Possui exatamente o mesmo tamanho compacto do NormalRadarOverlay, porém com fundo Vermelho Sólido
      * estático (sem piscar nem animar escala) e o texto "Acima do Limite".
      */
+    @OptIn(ExperimentalFoundationApi::class)
     @Composable
     private fun WarningStaticRadarOverlay(
         distanceMeters: Int,
@@ -912,7 +960,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         radarType: String,
         isDarkMode: Boolean,
         source: String? = null,
-        onBlacklistClick: () -> Unit
+        onBlacklistClick: () -> Unit,
+        onBlacklistLongClick: (() -> Unit)? = null
     ) {
         val (typeIcon, _) = getRadarTypeInfo(radarType)
         val backgroundColor = if (isDarkMode) Color(0xFF8B0000) else Color(0xFFD50000)
@@ -997,12 +1046,17 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
                 Spacer(modifier = Modifier.width(4.dp))
 
-                // Botão Gigante de Blacklist (Fase 9.1: 72.dp)
-                Surface(
-                    onClick = onBlacklistClick,
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.Black.copy(alpha = 0.35f),
-                    modifier = Modifier.size(72.dp)
+                // Botão Gigante de Blacklist Híbrida (Fase 9.1 / 9.3: 72.dp com Toque Rápido e Toque Longo)
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .combinedClickable(
+                            onClick = onBlacklistClick,
+                            onLongClick = onBlacklistLongClick
+                        ),
+                    contentAlignment = Alignment.Center
                 ) {
                     Column(
                         modifier = Modifier.fillMaxSize(),
@@ -1063,6 +1117,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
      * Janela pequena e discreta (verde/cinza escuro) para quando o carro está dentro do limite.
      * Exibe o ícone específico do tipo de radar (🚦 Semáforo, 📸 Fixo, 🚶 Lombada, ⏱️ Trecho).
      */
+    @OptIn(ExperimentalFoundationApi::class)
     @Composable
     private fun NormalRadarOverlay(
         distanceMeters: Int,
@@ -1071,7 +1126,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         radarType: String,
         isDarkMode: Boolean,
         source: String? = null,
-        onBlacklistClick: () -> Unit
+        onBlacklistClick: () -> Unit,
+        onBlacklistLongClick: (() -> Unit)? = null
     ) {
         val (typeIcon, typeLabel) = getRadarTypeInfo(radarType)
         val backgroundColor = if (isDarkMode) Color(0xFF000000) else Color(0xFF1E2822).copy(alpha = 0.94f)
@@ -1159,12 +1215,17 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
                 Spacer(modifier = Modifier.width(4.dp))
 
-                // Botão Gigante de Blacklist (Fase 9.1: 72.dp)
-                Surface(
-                    onClick = onBlacklistClick,
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.Black.copy(alpha = 0.35f),
-                    modifier = Modifier.size(72.dp)
+                // Botão Gigante de Blacklist Híbrida (Fase 9.1 / 9.3: 72.dp com Toque Rápido e Toque Longo)
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .combinedClickable(
+                            onClick = onBlacklistClick,
+                            onLongClick = onBlacklistLongClick
+                        ),
+                    contentAlignment = Alignment.Center
                 ) {
                     Column(
                         modifier = Modifier.fillMaxSize(),
@@ -1194,6 +1255,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
      * Layout maior com fundo vermelho piscando agressivamente via InfiniteTransition.
      * Exibe o ícone e rótulo do tipo de radar com aviso incisivo de redução.
      */
+    @OptIn(ExperimentalFoundationApi::class)
     @Composable
     private fun AggressiveRadarOverlay(
         distanceMeters: Int,
@@ -1202,7 +1264,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         radarType: String,
         isDarkMode: Boolean,
         source: String? = null,
-        onBlacklistClick: () -> Unit
+        onBlacklistClick: () -> Unit,
+        onBlacklistLongClick: (() -> Unit)? = null
     ) {
         val (typeIcon, typeLabel) = getRadarTypeInfo(radarType)
         val infiniteTransition = rememberInfiniteTransition(label = "AggressiveAlertTransition")
@@ -1324,12 +1387,17 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
                 Spacer(modifier = Modifier.width(6.dp))
 
-                // Botão Gigante de Blacklist (Fase 9.1: 72.dp)
-                Surface(
-                    onClick = onBlacklistClick,
-                    shape = RoundedCornerShape(18.dp),
-                    color = Color.Black.copy(alpha = 0.4f),
-                    modifier = Modifier.size(72.dp)
+                // Botão Gigante de Blacklist Híbrida (Fase 9.1 / 9.3: 72.dp com Toque Rápido e Toque Longo)
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .combinedClickable(
+                            onClick = onBlacklistClick,
+                            onLongClick = onBlacklistLongClick
+                        ),
+                    contentAlignment = Alignment.Center
                 ) {
                     Column(
                         modifier = Modifier.fillMaxSize(),

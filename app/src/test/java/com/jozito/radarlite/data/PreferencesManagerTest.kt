@@ -134,4 +134,72 @@ class PreferencesManagerTest {
         // 7. Outro radar não banido -> LIBERADO
         assertFalse(isApproachBanned(9999L, 185.0))
     }
+
+    @Test
+    fun testFase93HybridBlacklistGlobalAndVectorLogic() {
+        val bannedApproaches = mutableSetOf<String>()
+
+        fun banRadarGlobally(radarId: Long) {
+            bannedApproaches.add("${radarId}_GLOBAL")
+        }
+
+        fun banApproach(radarId: Long, bearing: Double) {
+            val norm = ((bearing.toInt() % 360) + 360) % 360
+            bannedApproaches.add("${radarId}_$norm")
+        }
+
+        fun isRadarGloballyBanned(radarId: Long): Boolean {
+            return bannedApproaches.contains("${radarId}_GLOBAL") || bannedApproaches.contains(radarId.toString())
+        }
+
+        fun isApproachBanned(radarId: Long, currentBearing: Double, tolerance: Double = 60.0): Boolean {
+            val idStr = radarId.toString()
+            val globalKey = "${radarId}_GLOBAL"
+            if (bannedApproaches.contains(globalKey) || bannedApproaches.contains(idStr)) {
+                return true
+            }
+
+            val prefix = "${radarId}_"
+            val entries = bannedApproaches.filter { it.startsWith(prefix) && it != globalKey }
+            if (entries.isEmpty()) return false
+
+            for (entry in entries) {
+                val bannedBearing = entry.removePrefix(prefix).toDoubleOrNull() ?: continue
+                var angleDiff = Math.abs(currentBearing - bannedBearing) % 360.0
+                if (angleDiff > 180.0) angleDiff = 360.0 - angleDiff
+                if (angleDiff <= tolerance) return true
+            }
+            return false
+        }
+
+        // Radar 5000: Banimento global via Long Press
+        banRadarGlobally(5000L)
+        assert(isRadarGloballyBanned(5000L))
+        assert(isApproachBanned(5000L, 0.0))
+        assert(isApproachBanned(5000L, 90.0))
+        assert(isApproachBanned(5000L, 180.0))
+        assert(isApproachBanned(5000L, 270.0))
+
+        // Radar 6000: Banimento direcionado apenas no sentido Leste (90°) via Toque Rápido
+        banApproach(6000L, 90.0)
+        assertFalse(isRadarGloballyBanned(6000L))
+        assert(isApproachBanned(6000L, 90.0))
+        assert(isApproachBanned(6000L, 120.0)) // diff 30° <= 60°
+        assertFalse(isApproachBanned(6000L, 270.0)) // Sentido oposto liberado!
+
+        // Verificação de extração de ID para o diálogo da Blacklist
+        val longIds = bannedApproaches.mapNotNull { entry ->
+            val idPart = if (entry.contains("_")) entry.substringBefore('_') else entry
+            idPart.toLongOrNull()
+        }.toSet()
+
+        assert(longIds.contains(5000L))
+        assert(longIds.contains(6000L))
+
+        // Remoção unban (remove prefixo "5000_")
+        val prefix5000 = "5000_"
+        bannedApproaches.removeAll { it == "5000" || it.startsWith(prefix5000) }
+        assertFalse(isRadarGloballyBanned(5000L))
+        assertFalse(isApproachBanned(5000L, 0.0))
+    }
 }

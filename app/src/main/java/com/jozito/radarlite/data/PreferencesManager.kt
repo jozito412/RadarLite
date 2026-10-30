@@ -173,6 +173,26 @@ class PreferencesManager(context: Context) {
         banApproach(radarId, bearing.toDouble())
     }
 
+    /**
+     * Bane um radar globalmente em todas as direções (Fase 9.3: Long Press).
+     * Formato da chave: "${radarId}_GLOBAL".
+     */
+    fun banRadarGlobally(radarId: Long) {
+        val entry = "${radarId}_GLOBAL"
+        val current = bannedApproaches.toMutableSet()
+        current.add(entry)
+        prefs.edit().putStringSet(KEY_BANNED_APPROACHES, current).apply()
+    }
+
+    /**
+     * Verifica se o radar está banido em TODAS as direções (marreta global - Fase 9.3).
+     */
+    fun isRadarGloballyBanned(radarId: Long): Boolean {
+        val idStr = radarId.toString()
+        val globalKey = "${radarId}_GLOBAL"
+        return bannedApproaches.contains(globalKey) || bannedApproaches.contains(idStr)
+    }
+
     fun banRadar(radarId: Long, bearing: Float = 0f) {
         banApproach(radarId, bearing)
     }
@@ -189,20 +209,23 @@ class PreferencesManager(context: Context) {
     }
 
     /**
-     * Verifica se o radar está banido para o vetor direcional informado (Fase 9.2).
+     * Verifica se o radar está banido para o vetor direcional informado (Fase 9.2 e 9.3).
+     * Prioridade máxima: se o radar foi banido globalmente ("${radarId}_GLOBAL"), retorna true imediatamente.
      * Cone de Bloqueio padrão: 60 graus.
      */
     fun isApproachBanned(radarId: Long, currentBearing: Double, toleranceDegrees: Double = 60.0): Boolean {
         val idStr = radarId.toString()
+        val globalKey = "${radarId}_GLOBAL"
+        if (bannedApproaches.contains(globalKey) || bannedApproaches.contains(idStr)) {
+            // Marreta global: radar banido em todas as direções ou ID legado
+            return true
+        }
+
         val prefix = "${radarId}_"
-        val matchingEntries = bannedApproaches.filter { it == idStr || it.startsWith(prefix) }
+        val matchingEntries = bannedApproaches.filter { it.startsWith(prefix) && it != globalKey }
         if (matchingEntries.isEmpty()) return false
 
         for (entry in matchingEntries) {
-            if (entry == idStr) {
-                // Bloqueio legado total por ID
-                return true
-            }
             val bannedBearing = entry.removePrefix(prefix).toDoubleOrNull()
             if (bannedBearing != null) {
                 var angleDiff = abs(currentBearing - bannedBearing) % 360.0

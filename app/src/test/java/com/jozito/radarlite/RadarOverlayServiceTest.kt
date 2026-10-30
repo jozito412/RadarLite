@@ -510,5 +510,46 @@ class RadarOverlayServiceTest {
         assertTrue(speedsResult.any { it.id == 401L })
         assertTrue(speedsResult.any { it.id == 402L })
     }
+
+    @Test
+    fun testFase93HybridBlacklistGlobalHammerAndDirectionalCone() {
+        // Cenário 1: Marreta Global ("${radarId}_GLOBAL") bloqueia em qualquer sentido (360 graus)
+        val globalBannedApproaches = setOf("9001_GLOBAL", "9002_180")
+
+        // Radar 9001 foi banido com Long Press (Global)
+        assertTrue(RadarOverlayService.isApproachBanned(9001L, 0f, globalBannedApproaches))
+        assertTrue(RadarOverlayService.isApproachBanned(9001L, 90f, globalBannedApproaches))
+        assertTrue(RadarOverlayService.isApproachBanned(9001L, 180f, globalBannedApproaches))
+        assertTrue(RadarOverlayService.isApproachBanned(9001L, 270f, globalBannedApproaches))
+        assertTrue(RadarOverlayService.isApproachBanned(9001L, 359f, globalBannedApproaches))
+        assertTrue(RadarOverlayService.isApproachBanned(9001L, null, globalBannedApproaches))
+
+        // Cenário 2: Radar 9002 foi banido com Toque Rápido no sentido Sul (180°)
+        // Bloqueia com +/- 60° (entre 120° e 240°)
+        assertTrue(RadarOverlayService.isApproachBanned(9002L, 180f, globalBannedApproaches))
+        assertTrue(RadarOverlayService.isApproachBanned(9002L, 130f, globalBannedApproaches)) // diff 50° <= 60°
+        assertTrue(RadarOverlayService.isApproachBanned(9002L, 230f, globalBannedApproaches)) // diff 50° <= 60°
+        assertTrue(RadarOverlayService.isApproachBanned(9002L, 120f, globalBannedApproaches)) // diff 60° <= 60°
+        assertTrue(RadarOverlayService.isApproachBanned(9002L, 240f, globalBannedApproaches)) // diff 60° <= 60°
+
+        // Não bloqueia fora do cone de 60° (sentido Norte, Leste, Oeste)
+        assertFalse(RadarOverlayService.isApproachBanned(9002L, 0f, globalBannedApproaches)) // diff 180° > 60°
+        assertFalse(RadarOverlayService.isApproachBanned(9002L, 90f, globalBannedApproaches)) // diff 90° > 60°
+        assertFalse(RadarOverlayService.isApproachBanned(9002L, 270f, globalBannedApproaches)) // diff 90° > 60°
+        assertFalse(RadarOverlayService.isApproachBanned(9002L, 241f, globalBannedApproaches)) // diff 61° > 60°
+
+        // Cenário 3: Radar 9999 não banido -> não bloqueia
+        assertFalse(RadarOverlayService.isApproachBanned(9999L, 180f, globalBannedApproaches))
+
+        // Cenário 4: shouldIgnoreRadar integrando com RadarEntity
+        val testRadarGlobal = RadarEntity(id = 9001L, latitude = -25.4, longitude = -49.2, speedLimit = 60, type = "FIXED")
+        val testRadarVector = RadarEntity(id = 9002L, latitude = -25.4, longitude = -49.2, speedLimit = 60, type = "FIXED")
+        val testRadarClean = RadarEntity(id = 9003L, latitude = -25.4, longitude = -49.2, speedLimit = 60, type = "FIXED")
+
+        assertTrue(RadarOverlayService.shouldIgnoreRadar(testRadarGlobal, blacklistedIds = globalBannedApproaches, vehicleBearing = 0f))
+        assertTrue(RadarOverlayService.shouldIgnoreRadar(testRadarVector, blacklistedIds = globalBannedApproaches, vehicleBearing = 180f))
+        assertFalse(RadarOverlayService.shouldIgnoreRadar(testRadarVector, blacklistedIds = globalBannedApproaches, vehicleBearing = 0f))
+        assertFalse(RadarOverlayService.shouldIgnoreRadar(testRadarClean, blacklistedIds = globalBannedApproaches, vehicleBearing = 180f))
+    }
 }
 

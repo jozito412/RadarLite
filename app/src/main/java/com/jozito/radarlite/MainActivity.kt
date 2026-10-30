@@ -1660,8 +1660,11 @@ fun BlacklistManagerDialog(
                             val sourceLabel = radar.source?.ifBlank { "OSM" } ?: "OSM"
                             val (_, typeLabel) = RadarOverlayService.getRadarTypeInfo(radar.type)
                             val displayTitle = "$sourceLabel - $typeLabel ${radar.speedLimit} km/h"
+                            val isGlobal = prefs.isRadarGloballyBanned(radar.id)
                             val bannedBearings = prefs.getBannedBearingsForRadar(radar.id)
-                            val directionSubtitle = if (bannedBearings.isNotEmpty()) {
+                            val directionSubtitle = if (isGlobal) {
+                                " • Bloqueio: TODAS as direções (Global)"
+                            } else if (bannedBearings.isNotEmpty()) {
                                 " • Sentido(s): ${bannedBearings.joinToString { "${it.toInt()}°" }}"
                             } else ""
 

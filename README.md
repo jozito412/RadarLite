@@ -50,17 +50,16 @@ Você pode baixar diretamente o instalador compilado da versão 1.0:
   - Ao desligar o veículo e desconectar, o serviço é pausado e liberado para economizar bateria.
   - Mecanismo de verificação ativa com *heartbeat* para impedir interrupções indesejadas em saídas rápidas do carro.
 
-### 4. 🛡️ Curadoria Manual & Blacklist Vetorial Direcional (Fase 9, 9.1 & 9.2)
-- **Blacklist Vetorial Direcional (Fase 9.2):**
-  - O banimento não apaga o radar para todas as vias do cruzamento. Ele grava o vetor de aproximação exato (`${radarId}_${bearing}`) no milissegundo do clique.
-  - Bloqueia apenas o cone de aproximação de até 60º do sentido do usuário. Carros trafegando no sentido oposto ou em vias transversais continuam sendo alertados normalmente.
+### 4. 🛡️ Curadoria Manual & Blacklist Híbrida (Fases 9, 9.1, 9.2 & 9.3)
+- **Blacklist Híbrida com Gestos Inteligentes (Fase 9.3):**
+  - **👆 Toque Rápido (Sentido Atual):** Bane apenas o vetor direcional atual de aproximação (`${radarId}_${bearing}`). Aplica um cone de bloqueio de 60º no sentido em que o carro está se deslocando. Ideal para radares que multam apenas a pista oposta ou vias paralelas. Toast: *"Radar banido neste sentido"*.
+  - **⏳ Toque Longo / Long Press (Todas as Direções):** Dispara uma resposta háptica (vibração sutil) e bane o radar globalmente (`${radarId}_GLOBAL`). Aplica a marreta global, ignorando o radar de qualquer ângulo de aproximação. Ideal para postes ou lombadas eletrônicas fisicamente desinstalados. Toast: *"Radar banido em TODAS as direções"*.
 - **Botão Gigante de 72dp:**
-  - Botão com área de toque ampla de `72.dp` e ícone bem visível para ignorar falsos positivos com total segurança ao volante.
-  - Confirmação visual instantânea via `Toast` do sistema.
+  - Botão ergonômico com área de toque de `72.dp` e ícone bem visível para curadoria segura em movimento.
 - **Transparência de Fonte:**
   - Exibe a origem do radar diretamente no card (ex: `OSM`, `DNIT`, `ANTT`).
-- **Gerenciador de Radares Ignorados:**
-  - Painel na tela principal para consultar todos os radares banidos com exibição dos sentidos bloqueados, restaurar radares individualmente ou limpar toda a blacklist com um único toque.
+- **Gerenciador de Radares Ignorados na Tela Principal:**
+  - Painel para consultar todos os radares banidos com indicação clara de bloqueio por sentido ou global, restauração individual ou limpeza completa da blacklist com um toque.
 - **Filtro Global de Falsos Positivos:**
   - Opção para ignorar em massa radares cadastrados pelo OpenStreetMap caso o usuário prefira apenas bases homologadas.
 
