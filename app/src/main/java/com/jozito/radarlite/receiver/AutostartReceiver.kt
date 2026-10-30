@@ -46,12 +46,13 @@ class AutostartReceiver : BroadcastReceiver() {
         }
 
         /**
-         * Verifica se a ação recebida representa redundância de ignição da central multimídia (Boot / QuickBoot / Screen On).
-         * Muitas centrais multimídia automotivas acendem a tela (SCREEN_ON) ao girar a chave sem reiniciar o Android.
+         * Verifica se a ação recebida representa redundância de ignição da central multimídia (Boot / QuickBoot / Screen On / Power Connected).
+         * Muitas centrais multimídia automotivas acendem a tela (SCREEN_ON) ou recebem sinal de energia ACC (ACTION_POWER_CONNECTED) ao girar a chave sem reiniciar o Android.
          */
         fun isIgnitionOrBootAction(action: String?): Boolean {
             return action == Intent.ACTION_BOOT_COMPLETED ||
                     action == Intent.ACTION_SCREEN_ON ||
+                    action == Intent.ACTION_POWER_CONNECTED ||
                     action == ACTION_QUICKBOOT_POWERON ||
                     action == ACTION_HTC_QUICKBOOT_POWERON ||
                     action == Intent.ACTION_MY_PACKAGE_REPLACED
@@ -172,20 +173,27 @@ class AutostartReceiver : BroadcastReceiver() {
             return
         }
 
-        // 2. Comandos remotos explícitos do Launcher CoolantHUD (não dependem de prefs.isAutostartEnabled)
+        val prefs = PreferencesManager.getInstance(context)
+
+        // 2. Comandos remotos explícitos do Launcher CoolantHUD (atualizam a intenção do usuário - Fase 11)
         if (action == ACTION_START) {
+            prefs.isServiceIntentionallyStopped = false
             startServiceSilently(context, action)
             return
         }
         if (action == ACTION_STOP) {
+            prefs.isServiceIntentionallyStopped = true
             stopServiceSilently(context, action)
             return
         }
 
-        val prefs = PreferencesManager.getInstance(context)
-
-        // 3. Redundância de Ignição / Boot da Central Multimídia (Boot, QuickBoot ou Screen On ao ligar a chave)
+        // 3. Redundância de Ignição / Boot da Central Multimídia (Boot, QuickBoot, Screen On ou Power Connected)
         if (isIgnitionOrBootAction(action)) {
+            // Fase 11: Se o usuário parou o serviço intencionalmente (via STOP), não liga sozinho ao religar o carro
+            if (prefs.isServiceIntentionallyStopped) {
+                Log.d(TAG, "Serviço parado intencionalmente pelo usuário (is_service_intentionally_stopped = true). Ignorando gatilho de ignição/boot $action.")
+                return
+            }
             if (!prefs.isAutostartEnabled) {
                 Log.d(TAG, "Autostart desativado nas preferências (is_autostart_enabled = false). Ignorando evento de ignição/boot $action.")
                 return
@@ -202,6 +210,11 @@ class AutostartReceiver : BroadcastReceiver() {
                 action == BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED
 
         if (isBtAction) {
+            // Fase 11: Se o usuário parou intencionalmente, não religa por Bluetooth
+            if (prefs.isServiceIntentionallyStopped && action != BluetoothDevice.ACTION_ACL_DISCONNECTED) {
+                Log.d(TAG, "Serviço parado intencionalmente pelo usuário (is_service_intentionally_stopped = true). Ignorando conexão Bluetooth.")
+                return
+            }
             if (!prefs.isAutostartEnabled) {
                 Log.d(TAG, "Autostart por Bluetooth desativado nas configurações. Ignorando evento $action.")
                 return
@@ -225,6 +238,10 @@ class AutostartReceiver : BroadcastReceiver() {
         }
 
         if (isAutostartIntent(intent)) {
+            if (prefs.isServiceIntentionallyStopped) {
+                Log.d(TAG, "Serviço parado intencionalmente pelo usuário. Ignorando autostart intent ($action).")
+                return
+            }
             startServiceSilently(context, action)
         } else if (isAutostopIntent(intent)) {
             stopServiceSilently(context, action)
@@ -233,6 +250,7 @@ class AutostartReceiver : BroadcastReceiver() {
 
     private fun startServiceSilently(context: Context, triggerAction: String) {
         synchronized(startLock) {
+            PreferencesManager.getInstance(context).isServiceIntentionallyStopped = false
             if (RadarOverlayService.isRunning.value) {
                 Log.d(TAG, "RadarOverlayService já está em execução. Ignorando gatilho duplicado ($triggerAction).")
                 return

@@ -12,6 +12,7 @@ class PreferencesManagerTest {
         assertEquals("is_sound_enabled", PreferencesManager.KEY_IS_SOUND_ENABLED)
         assertEquals("is_autostart_enabled", PreferencesManager.KEY_IS_AUTOSTART_ENABLED)
         assertEquals("is_bt_autostart_enabled", PreferencesManager.KEY_IS_BT_AUTOSTART_ENABLED)
+        assertEquals("is_service_intentionally_stopped", PreferencesManager.KEY_IS_SERVICE_INTENTIONALLY_STOPPED)
         assertEquals("dist_low_speed", PreferencesManager.KEY_DIST_LOW_SPEED)
         assertEquals("dist_city", PreferencesManager.KEY_DIST_CITY)
         assertEquals("dist_express", PreferencesManager.KEY_DIST_EXPRESS)

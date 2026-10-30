@@ -70,6 +70,17 @@ class PreferencesManager(context: Context) {
         }
 
     /**
+     * Fase 11: Estado de "Intenção do Usuário".
+     * Se true: o usuário desligou manualmente o serviço (via botão interno ou comando remoto do CoolantHUD).
+     * O auto-start não deve religar o serviço enquanto essa chave for true.
+     * Se false: o serviço pode religar normalmente ao acordar do sleep, ligar a ignição, conectar energia ou bluetooth.
+     * Valor padrão: false.
+     */
+    var isServiceIntentionallyStopped: Boolean
+        get() = prefs.getBoolean(KEY_IS_SERVICE_INTENTIONALLY_STOPPED, false)
+        set(value) = prefs.edit().putBoolean(KEY_IS_SERVICE_INTENTIONALLY_STOPPED, value).apply()
+
+    /**
      * Endereço MAC do dispositivo Bluetooth veicular configurado (ex: "AA:BB:CC:DD:EE:FF").
      * Se null ou vazio, qualquer conexão Bluetooth é aceita como gatilho (modo genérico).
      */
@@ -318,6 +329,7 @@ class PreferencesManager(context: Context) {
         const val KEY_IS_HUD_MODE_ENABLED = "is_hud_mode_enabled"
         const val KEY_IS_AUTOSTART_ENABLED = "is_autostart_enabled"
         const val KEY_IS_BT_AUTOSTART_ENABLED = "is_bt_autostart_enabled"
+        const val KEY_IS_SERVICE_INTENTIONALLY_STOPPED = "is_service_intentionally_stopped"
         const val KEY_SELECTED_BT_DEVICE_ADDRESS = "selected_bt_device_address"
         const val KEY_SELECTED_BT_DEVICE_NAME = "selected_bt_device_name"
         const val KEY_LAST_SYNC_TIMESTAMP = "last_sync_timestamp"

@@ -324,9 +324,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         val closestRadarAlertDistance: StateFlow<Float> = _closestRadarAlertDistance.asStateFlow()
 
         /**
-         * Inicia o serviço em primeiro plano.
+         * Inicia o serviço em primeiro plano e reseta o estado de parada intencional do usuário (Fase 11).
          */
         fun start(context: Context) {
+            PreferencesManager.getInstance(context).isServiceIntentionallyStopped = false
             val intent = Intent(context, RadarOverlayService::class.java).apply {
                 action = ACTION_START
             }
@@ -338,9 +339,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         }
 
         /**
-         * Para o serviço de rastreamento.
+         * Para o serviço de rastreamento e registra o estado de parada intencional do usuário (Fase 11).
          */
         fun stop(context: Context) {
+            PreferencesManager.getInstance(context).isServiceIntentionallyStopped = true
             val intent = Intent(context, RadarOverlayService::class.java).apply {
                 action = ACTION_STOP
             }
@@ -703,6 +705,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
         if (intent?.action == ACTION_STOP) {
             _isRunning.value = false
+            preferencesManager.isServiceIntentionallyStopped = true
             broadcastState(applicationContext, false)
             _isGpsLost.value = false
             _closestRadarAlertDistance.value = PreferencesManager.DEFAULT_DIST_HIGHWAY.toFloat()
@@ -712,6 +715,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         }
 
         _isRunning.value = true
+        preferencesManager.isServiceIntentionallyStopped = false
         broadcastState(applicationContext, true)
         startLocationUpdates()
 
@@ -720,6 +724,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             setupOverlayWindow()
         }
 
+        // Fase 11: START_STICKY garante resiliência a suspensão e recuperação pelo Android
         return START_STICKY
     }
 

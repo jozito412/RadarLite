@@ -43,12 +43,15 @@ Você pode baixar diretamente o instalador compilado da versão 1.0:
 - **Serviço em Primeiro Plano Blindado:**
   - Foreground Service prioritário com notificação permanente, protegido contra fechamento indevido pelo sistema operacional.
 
-### 3. 🚗 Automação Veicular para Centrais Multimídia & CoolantHUD
-- **Autostart Adaptado para Centrais Multimídia (Painel Android):**
-  - **Papel Invertido do Bluetooth:** Quando instalado diretamente na central do painel, o RadarLite escuta a conexão do **Smartphone do motorista** (sem restrições a `AUDIO_VIDEO_CAR_AUDIO`). O usuário pode configurar o MAC Address ou o Nome do seu celular para iniciar o app exclusivamente quando seu aparelho conectar.
-  - **Redundância de Ignição (Boot & Screen On):**
-    - **`BOOT_COMPLETED` & `QUICKBOOT_POWERON`:** Inicia automaticamente ao ligar o veículo caso a central reinicie a frio.
-    - **`SCREEN_ON`:** Muitas centrais multimídia não reiniciam o Android a cada partida; apenas suspendem o display e acendem a tela na ignição. O RadarLite detecta o acendimento da tela e inicializa o serviço silenciosamente (respeitando a opção `is_autostart_enabled` nas preferências).
+### 3. 🚗 Automação Veicular para Centrais Multimídia & CoolantHUD (Fase 11)
+- **Resiliência de Suspensão & Auto-Start Infalível (Fase 11):**
+  - **Sobrevivência com `START_STICKY`:** O `RadarOverlayService` opera em modo `START_STICKY`. Se o Android matar o serviço em segundo plano por escassez de memória enquanto a multimídia estiver em suspensão, o sistema recria o serviço automaticamente assim que houver recursos disponíveis.
+  - **Estado de Intenção do Usuário (`is_service_intentionally_stopped`):** O aplicativo sabe diferenciar paradas de rotina (desligar o carro) de uma decisão deliberada do usuário. Se o motorista clicar em **STOP** (pelo app ou pelo CoolantHUD), o app respeita e não religa sozinho ao acordar. Se o usuário nunca pediu para parar, o serviço se restabelece de imediato.
+  - **Gatilhos de Despertar na Linha ACC:**
+    - **`ACTION_POWER_CONNECTED`:** Detecta a ativação da linha de pós-chave / ACC da central multimídia.
+    - **`SCREEN_ON`:** Detecta o acendimento da tela ao ligar a ignição sem reboot do sistema.
+    - **`BOOT_COMPLETED` & `QUICKBOOT_POWERON`:** Detecta inicialização a frio da multimídia.
+  - **Papel Invertido do Bluetooth:** Quando instalado no painel, escuta a conexão do **Smartphone do motorista** (sem restrições a `AUDIO_VIDEO_CAR_AUDIO`), com filtro opcional por MAC ou Nome do aparelho.
 - **Controle Remoto & Sincronização de Via Dupla (CoolantHUD / Launchers Customizados):**
   - O aplicativo exporta comandos públicos via `AutostartReceiver` (`android:exported="true"`), permitindo ligar, desligar e sincronizar o status em tempo real com launchers automotivos:
     - **Ligar Overlay:** Dispare um broadcast com a action `"com.jozito412.radarlite.ACTION_START"`.

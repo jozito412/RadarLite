@@ -18,10 +18,12 @@ class AutostartReceiverTest {
         // Boot completed padrão do Android
         assertTrue(AutostartReceiver.isAutostartAction(Intent.ACTION_BOOT_COMPLETED))
 
-        // Redundância de Ignição da Central Multimídia (acendimento de tela na ignição)
+        // Redundância de Ignição da Central Multimídia (acendimento de tela na ignição e linha ACC)
         assertTrue(AutostartReceiver.isAutostartAction(Intent.ACTION_SCREEN_ON))
+        assertTrue(AutostartReceiver.isAutostartAction(Intent.ACTION_POWER_CONNECTED))
         assertTrue(AutostartReceiver.isIgnitionOrBootAction(Intent.ACTION_SCREEN_ON))
         assertTrue(AutostartReceiver.isIgnitionOrBootAction(Intent.ACTION_BOOT_COMPLETED))
+        assertTrue(AutostartReceiver.isIgnitionOrBootAction(Intent.ACTION_POWER_CONNECTED))
 
         // Conexão Bluetooth (smartphone conectando à central multimídia)
         assertTrue(AutostartReceiver.isAutostartAction(BluetoothDevice.ACTION_ACL_CONNECTED))
@@ -136,5 +138,31 @@ class AutostartReceiverTest {
         assertTrue(AutostartReceiver.isTargetBluetoothDevice(phoneMacAddress, null))
         assertTrue(AutostartReceiver.isTargetBluetoothDevice(anotherMacAddress, ""))
         assertTrue(AutostartReceiver.isTargetBluetoothDevice(null, null))
+    }
+
+    @Test
+    fun testUserIntentionOnWakeAndBoot() {
+        // Simulação da lógica da Fase 11:
+        fun shouldWakeService(action: String, isIntentionallyStopped: Boolean, isAutostartEnabled: Boolean): Boolean {
+            if (action == AutostartReceiver.ACTION_START) return true
+            if (action == AutostartReceiver.ACTION_STOP) return false
+            if (isIntentionallyStopped) return false
+            if (!isAutostartEnabled) return false
+            return AutostartReceiver.isIgnitionOrBootAction(action)
+        }
+
+        // Caso 1: Usuário NÃO parou intencionalmente o app e o carro liga a chave (POWER_CONNECTED) -> DEVE INICIAR
+        assertTrue(shouldWakeService(Intent.ACTION_POWER_CONNECTED, isIntentionallyStopped = false, isAutostartEnabled = true))
+        assertTrue(shouldWakeService(Intent.ACTION_SCREEN_ON, isIntentionallyStopped = false, isAutostartEnabled = true))
+        assertTrue(shouldWakeService(Intent.ACTION_BOOT_COMPLETED, isIntentionallyStopped = false, isAutostartEnabled = true))
+
+        // Caso 2: Usuário apertou STOP no app ou no CoolantHUD antes de sair do carro (isIntentionallyStopped = true)
+        // Ao religar o carro / acordar a central multimídia -> NÃO DEVE INICIAR
+        assertFalse(shouldWakeService(Intent.ACTION_POWER_CONNECTED, isIntentionallyStopped = true, isAutostartEnabled = true))
+        assertFalse(shouldWakeService(Intent.ACTION_SCREEN_ON, isIntentionallyStopped = true, isAutostartEnabled = true))
+        assertFalse(shouldWakeService(Intent.ACTION_BOOT_COMPLETED, isIntentionallyStopped = true, isAutostartEnabled = true))
+
+        // Caso 3: Comando explícito do Launcher ACTION_START sempre inicia
+        assertTrue(shouldWakeService(AutostartReceiver.ACTION_START, isIntentionallyStopped = true, isAutostartEnabled = true))
     }
 }

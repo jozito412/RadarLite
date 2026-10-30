@@ -452,6 +452,9 @@ fun RadarLiteApp() {
             Button(
                 onClick = {
                     if (isRunning) {
+                        // Fase 11: Registra intenção explícita de parada do usuário
+                        prefs.isServiceIntentionallyStopped = true
+
                         // Envia Intent para parar o RadarOverlayService
                         val stopIntent = Intent(context, RadarOverlayService::class.java).apply {
                             action = RadarOverlayService.ACTION_STOP
@@ -490,6 +493,9 @@ fun RadarLiteApp() {
                             }
                             return@Button
                         }
+
+                        // Fase 11: Registra intenção explícita de início do usuário (reseta flag de parada intencional)
+                        prefs.isServiceIntentionallyStopped = false
 
                         // 3. Envia Intent para iniciar o RadarOverlayService usando ContextCompat.startForegroundService
                         val startIntent = Intent(context, RadarOverlayService::class.java).apply {
