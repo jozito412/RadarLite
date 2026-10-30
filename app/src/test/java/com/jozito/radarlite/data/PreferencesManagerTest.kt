@@ -10,6 +10,8 @@ class PreferencesManagerTest {
     fun testPreferencesKeys() {
         assertEquals("warn_only_over_speed", PreferencesManager.KEY_WARN_ONLY_OVER_SPEED)
         assertEquals("is_sound_enabled", PreferencesManager.KEY_IS_SOUND_ENABLED)
+        assertEquals("is_autostart_enabled", PreferencesManager.KEY_IS_AUTOSTART_ENABLED)
+        assertEquals("is_bt_autostart_enabled", PreferencesManager.KEY_IS_BT_AUTOSTART_ENABLED)
         assertEquals("dist_low_speed", PreferencesManager.KEY_DIST_LOW_SPEED)
         assertEquals("dist_city", PreferencesManager.KEY_DIST_CITY)
         assertEquals("dist_express", PreferencesManager.KEY_DIST_EXPRESS)

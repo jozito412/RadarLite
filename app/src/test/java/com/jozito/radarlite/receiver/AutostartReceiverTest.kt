@@ -18,7 +18,12 @@ class AutostartReceiverTest {
         // Boot completed padrão do Android
         assertTrue(AutostartReceiver.isAutostartAction(Intent.ACTION_BOOT_COMPLETED))
 
-        // Conexão Bluetooth (carro conectando ao smartphone ou multimídia conectando ao celular)
+        // Redundância de Ignição da Central Multimídia (acendimento de tela na ignição)
+        assertTrue(AutostartReceiver.isAutostartAction(Intent.ACTION_SCREEN_ON))
+        assertTrue(AutostartReceiver.isIgnitionOrBootAction(Intent.ACTION_SCREEN_ON))
+        assertTrue(AutostartReceiver.isIgnitionOrBootAction(Intent.ACTION_BOOT_COMPLETED))
+
+        // Conexão Bluetooth (smartphone conectando à central multimídia)
         assertTrue(AutostartReceiver.isAutostartAction(BluetoothDevice.ACTION_ACL_CONNECTED))
 
         // Atualização de aplicativo em segundo plano
@@ -27,6 +32,7 @@ class AutostartReceiverTest {
         // QuickBoot automotivo (ignição do veículo ligada)
         assertTrue(AutostartReceiver.isAutostartAction("android.intent.action.QUICKBOOT_POWERON"))
         assertTrue(AutostartReceiver.isAutostartAction("com.htc.intent.action.QUICKBOOT_POWERON"))
+        assertTrue(AutostartReceiver.isIgnitionOrBootAction("android.intent.action.QUICKBOOT_POWERON"))
 
         // Controle remoto por Launcher customizado (ex: CoolantHUD)
         assertEquals("com.jozito412.radarlite.ACTION_START", AutostartReceiver.ACTION_START)
@@ -106,23 +112,29 @@ class AutostartReceiverTest {
 
     @Test
     fun testTargetBluetoothDeviceFiltering() {
-        val carMacAddress = "00:11:22:33:44:55"
-        val headphonesMacAddress = "AA:BB:CC:DD:EE:FF"
+        val phoneMacAddress = "00:11:22:33:44:55"
+        val anotherMacAddress = "AA:BB:CC:DD:EE:FF"
+        val phoneName = "iPhone de Jozito"
 
-        // 1. Se configurado com o MAC do carro:
-        // O carro conecta -> aceita!
-        assertTrue(AutostartReceiver.isTargetBluetoothDevice(carMacAddress, carMacAddress))
-        // Carro conecta com letras minúsculas (case-insensitive) -> aceita!
+        // 1. Cenário: Central multimídia configurada com o MAC do smartphone do usuário
+        // Smartphone conecta -> aceita!
+        assertTrue(AutostartReceiver.isTargetBluetoothDevice(phoneMacAddress, phoneMacAddress))
+        // Smartphone conecta com letras minúsculas (case-insensitive) -> aceita!
         assertTrue(AutostartReceiver.isTargetBluetoothDevice("00:11:22:33:44:55", "00:11:22:33:44:55".lowercase()))
-        // Fones de ouvido conectam -> descarta!
-        assertFalse(AutostartReceiver.isTargetBluetoothDevice(headphonesMacAddress, carMacAddress))
+        // Outro aparelho desconhecido conecta -> descarta!
+        assertFalse(AutostartReceiver.isTargetBluetoothDevice(anotherMacAddress, phoneMacAddress))
         // Dispositivo nulo conecta -> descarta!
-        assertFalse(AutostartReceiver.isTargetBluetoothDevice(null, carMacAddress))
+        assertFalse(AutostartReceiver.isTargetBluetoothDevice(null, phoneMacAddress))
 
-        // 2. Se o usuário configurou para "Qualquer dispositivo" (MAC vazio ou nulo):
-        // Qualquer dispositivo conecta -> aceita!
-        assertTrue(AutostartReceiver.isTargetBluetoothDevice(carMacAddress, null))
-        assertTrue(AutostartReceiver.isTargetBluetoothDevice(headphonesMacAddress, ""))
+        // 2. Cenário: Central multimídia configurada com o Nome do smartphone
+        assertTrue(AutostartReceiver.isTargetBluetoothDevice("XX:XX", null, phoneName, "iPhone de Jozito"))
+        assertTrue(AutostartReceiver.isTargetBluetoothDevice("XX:XX", null, phoneName, "iphone de jozito"))
+        assertFalse(AutostartReceiver.isTargetBluetoothDevice("XX:XX", null, "Outro Celular", "iPhone de Jozito"))
+
+        // 3. Cenário: Modo genérico (sem MAC nem Nome específico):
+        // Qualquer smartphone/dispositivo conectando é aceito pela central sem restrição a CAR_AUDIO
+        assertTrue(AutostartReceiver.isTargetBluetoothDevice(phoneMacAddress, null))
+        assertTrue(AutostartReceiver.isTargetBluetoothDevice(anotherMacAddress, ""))
         assertTrue(AutostartReceiver.isTargetBluetoothDevice(null, null))
     }
 }

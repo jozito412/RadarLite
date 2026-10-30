@@ -43,18 +43,18 @@ Você pode baixar diretamente o instalador compilado da versão 1.0:
 - **Serviço em Primeiro Plano Blindado:**
   - Foreground Service prioritário com notificação permanente, protegido contra fechamento indevido pelo sistema operacional.
 
-### 3. 🚗 Automação Veicular & Integração Remota (Bluetooth & CoolantHUD)
-- **Hands-Free Total via Bluetooth:**
-  - Selecione o dispositivo Bluetooth do som ou multimídia do seu veículo nas configurações.
-  - Ao ligar o carro e conectar no Bluetooth, o RadarLite inicia o serviço flutuante automaticamente.
-  - Ao desligar o veículo e desconectar, o serviço é pausado e liberado para economizar bateria.
-  - Mecanismo de verificação ativa com *heartbeat* para impedir interrupções indesejadas em saídas rápidas do carro.
+### 3. 🚗 Automação Veicular para Centrais Multimídia & CoolantHUD
+- **Autostart Adaptado para Centrais Multimídia (Painel Android):**
+  - **Papel Invertido do Bluetooth:** Quando instalado diretamente na central do painel, o RadarLite escuta a conexão do **Smartphone do motorista** (sem restrições a `AUDIO_VIDEO_CAR_AUDIO`). O usuário pode configurar o MAC Address ou o Nome do seu celular para iniciar o app exclusivamente quando seu aparelho conectar.
+  - **Redundância de Ignição (Boot & Screen On):**
+    - **`BOOT_COMPLETED` & `QUICKBOOT_POWERON`:** Inicia automaticamente ao ligar o veículo caso a central reinicie a frio.
+    - **`SCREEN_ON`:** Muitas centrais multimídia não reiniciam o Android a cada partida; apenas suspendem o display e acendem a tela na ignição. O RadarLite detecta o acendimento da tela e inicializa o serviço silenciosamente (respeitando a opção `is_autostart_enabled` nas preferências).
 - **Controle Remoto & Sincronização de Via Dupla (CoolantHUD / Launchers Customizados):**
   - O aplicativo exporta comandos públicos via `AutostartReceiver` (`android:exported="true"`), permitindo ligar, desligar e sincronizar o status em tempo real com launchers automotivos:
     - **Ligar Overlay:** Dispare um broadcast com a action `"com.jozito412.radarlite.ACTION_START"`.
     - **Desligar Overlay:** Dispare um broadcast com a action `"com.jozito412.radarlite.ACTION_STOP"`.
     - **Solicitar Status (Ping):** Dispare a action `"com.jozito412.radarlite.ACTION_REQUEST_STATE"`. O RadarLite responde instantaneamente transmitindo o status real.
-    - **Broadcast de Estado (Pong / Eventos):** O RadarLite emite a action `"com.jozito412.radarlite.ACTION_STATE_CHANGED"` com o extra booleano `"is_running"` (`true`/`false`) sempre que o serviço é iniciado, encerrado (inclusive via Bluetooth) ou quando solicitado pelo Launcher.
+    - **Broadcast de Estado (Pong / Eventos):** O RadarLite emite a action `"com.jozito412.radarlite.ACTION_STATE_CHANGED"` com o extra booleano `"is_running"` (`true`/`false`) sempre que o serviço é iniciado, encerrado (inclusive via Bluetooth/Ignição) ou quando solicitado pelo Launcher.
   - Possui trava lógica de concorrência (`startLock`) que evita inicializações duplicadas caso o serviço já esteja em execução.
 
 ### 4. 🛡️ Curadoria Manual & Blacklist Híbrida (Fases 9, 9.1, 9.2 & 9.3)

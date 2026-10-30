@@ -46,14 +46,23 @@ class AutostartReceiver : BroadcastReceiver() {
         }
 
         /**
+         * Verifica se a ação recebida representa redundância de ignição da central multimídia (Boot / QuickBoot / Screen On).
+         * Muitas centrais multimídia automotivas acendem a tela (SCREEN_ON) ao girar a chave sem reiniciar o Android.
+         */
+        fun isIgnitionOrBootAction(action: String?): Boolean {
+            return action == Intent.ACTION_BOOT_COMPLETED ||
+                    action == Intent.ACTION_SCREEN_ON ||
+                    action == ACTION_QUICKBOOT_POWERON ||
+                    action == ACTION_HTC_QUICKBOOT_POWERON ||
+                    action == Intent.ACTION_MY_PACKAGE_REPLACED
+        }
+
+        /**
          * Verifica se a ação recebida é um gatilho válido de autostart.
          */
         fun isAutostartAction(action: String?): Boolean {
-            return action == Intent.ACTION_BOOT_COMPLETED ||
+            return isIgnitionOrBootAction(action) ||
                     action == BluetoothDevice.ACTION_ACL_CONNECTED ||
-                    action == ACTION_QUICKBOOT_POWERON ||
-                    action == ACTION_HTC_QUICKBOOT_POWERON ||
-                    action == Intent.ACTION_MY_PACKAGE_REPLACED ||
                     action == ACTION_START
         }
 
@@ -123,12 +132,31 @@ class AutostartReceiver : BroadcastReceiver() {
         }
 
         /**
-         * Verifica se o endereço MAC do dispositivo conectado bate com o dispositivo configurado pelo usuário.
-         * Se configuredAddress for nulo ou vazio, aceita qualquer dispositivo pareado (modo genérico).
+         * Verifica se o dispositivo conectado corresponde ao smartphone do usuário.
+         * Na central multimídia automotiva, a multimídia recebe a conexão de smartphones.
+         * Não exige restrição de classe AUDIO_VIDEO_CAR_AUDIO.
+         * Suporta validação por endereço MAC, Nome do aparelho ou modo genérico.
          */
+        fun isTargetBluetoothDevice(
+            deviceAddress: String?,
+            configuredAddress: String?,
+            deviceName: String? = null,
+            configuredName: String? = null
+        ): Boolean {
+            // Se o usuário configurou um MAC específico, aceita apenas se for igual
+            if (!configuredAddress.isNullOrBlank()) {
+                return deviceAddress != null && deviceAddress.equals(configuredAddress, ignoreCase = true)
+            }
+            // Se o usuário configurou um Nome amigável específico, aceita apenas se for igual
+            if (!configuredName.isNullOrBlank()) {
+                return deviceName != null && deviceName.equals(configuredName, ignoreCase = true)
+            }
+            // Modo genérico / sem filtro restritivo: aceita qualquer dispositivo pareado conectado
+            return true
+        }
+
         fun isTargetBluetoothDevice(deviceAddress: String?, configuredAddress: String?): Boolean {
-            if (configuredAddress.isNullOrBlank()) return true
-            return deviceAddress != null && deviceAddress.equals(configuredAddress, ignoreCase = true)
+            return isTargetBluetoothDevice(deviceAddress, configuredAddress, null, null)
         }
     }
 
@@ -136,7 +164,7 @@ class AutostartReceiver : BroadcastReceiver() {
         val action = intent?.action ?: return
         Log.d(TAG, "Broadcast recebido: $action")
 
-        // Solicitação remota de status (Ping) por Launcher customizado (ex: CoolantHUD)
+        // 1. Solicitação remota de status (Ping) por Launcher customizado (ex: CoolantHUD)
         if (action == ACTION_REQUEST_STATE) {
             val currentState = RadarOverlayService.isRunning.value
             RadarOverlayService.broadcastState(context, currentState)
@@ -144,16 +172,37 @@ class AutostartReceiver : BroadcastReceiver() {
             return
         }
 
+        // 2. Comandos remotos explícitos do Launcher CoolantHUD (não dependem de prefs.isAutostartEnabled)
+        if (action == ACTION_START) {
+            startServiceSilently(context, action)
+            return
+        }
+        if (action == ACTION_STOP) {
+            stopServiceSilently(context, action)
+            return
+        }
+
         val prefs = PreferencesManager.getInstance(context)
 
-        // Se for um evento de Bluetooth, valida se a automação está ligada e se bate com o dispositivo do carro
+        // 3. Redundância de Ignição / Boot da Central Multimídia (Boot, QuickBoot ou Screen On ao ligar a chave)
+        if (isIgnitionOrBootAction(action)) {
+            if (!prefs.isAutostartEnabled) {
+                Log.d(TAG, "Autostart desativado nas preferências (is_autostart_enabled = false). Ignorando evento de ignição/boot $action.")
+                return
+            }
+            Log.i(TAG, "Gatilho de ignição veicular detectado ($action). Inicializando RadarOverlayService...")
+            startServiceSilently(context, action)
+            return
+        }
+
+        // 4. Conexão/Desconexão Bluetooth (Smartphones conectando/desconectando da Central Multimídia)
         val isBtAction = action == BluetoothDevice.ACTION_ACL_CONNECTED ||
                 action == BluetoothDevice.ACTION_ACL_DISCONNECTED ||
                 action == BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED ||
                 action == BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED
 
         if (isBtAction) {
-            if (!prefs.isBluetoothAutostartEnabled) {
+            if (!prefs.isAutostartEnabled) {
                 Log.d(TAG, "Autostart por Bluetooth desativado nas configurações. Ignorando evento $action.")
                 return
             }
@@ -166,44 +215,50 @@ class AutostartReceiver : BroadcastReceiver() {
             }
 
             val configuredAddress = prefs.selectedBluetoothDeviceAddress
-            if (!isTargetBluetoothDevice(device?.address, configuredAddress)) {
-                Log.d(TAG, "Dispositivo Bluetooth (${device?.address}) ignorado: não é o dispositivo do carro configurado ($configuredAddress).")
+            val configuredName = prefs.selectedBluetoothDeviceName
+            val deviceName = try { device?.name } catch (e: SecurityException) { null }
+
+            if (!isTargetBluetoothDevice(device?.address, configuredAddress, deviceName, configuredName)) {
+                Log.d(TAG, "Dispositivo Bluetooth (${device?.address} / $deviceName) ignorado: não é o smartphone configurado ($configuredAddress / $configuredName).")
                 return
             }
         }
 
-        if (action == ACTION_START || isAutostartIntent(intent)) {
-            // Trava lógica contra concorrência e múltiplos disparos simultâneos
-            synchronized(startLock) {
-                if (RadarOverlayService.isRunning.value) {
-                    Log.d(TAG, "RadarOverlayService já está em execução. Ignorando gatilho de autostart duplicado ($action).")
-                    return
-                }
+        if (isAutostartIntent(intent)) {
+            startServiceSilently(context, action)
+        } else if (isAutostopIntent(intent)) {
+            stopServiceSilently(context, action)
+        }
+    }
 
-                Log.i(TAG, "Gatilho de inicialização detectado ($action). Inicializando RadarOverlayService...")
-
-                val serviceIntent = createServiceIntent(context)
-
-                try {
-                    // Inicia o serviço como Foreground Service usando ContextCompat
-                    ContextCompat.startForegroundService(context, serviceIntent)
-                    Log.d(TAG, "RadarOverlayService iniciado com sucesso a partir de $action.")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Falha ao iniciar RadarOverlayService a partir do broadcast $action", e)
-                }
+    private fun startServiceSilently(context: Context, triggerAction: String) {
+        synchronized(startLock) {
+            if (RadarOverlayService.isRunning.value) {
+                Log.d(TAG, "RadarOverlayService já está em execução. Ignorando gatilho duplicado ($triggerAction).")
+                return
             }
-        } else if (action == ACTION_STOP || isAutostopIntent(intent)) {
-            Log.i(TAG, "Gatilho de parada detectado ($action). Encerrando RadarOverlayService...")
 
+            Log.i(TAG, "Inicializando RadarOverlayService silenciosamente a partir de $triggerAction...")
+            val serviceIntent = createServiceIntent(context)
             try {
-                val stopIntent = Intent(context, RadarOverlayService::class.java).apply {
-                    setAction(RadarOverlayService.ACTION_STOP)
-                }
-                context.stopService(stopIntent)
-                Log.d(TAG, "RadarOverlayService encerrado com sucesso a partir do broadcast $action.")
+                ContextCompat.startForegroundService(context, serviceIntent)
+                Log.d(TAG, "RadarOverlayService iniciado com sucesso a partir de $triggerAction.")
             } catch (e: Exception) {
-                Log.e(TAG, "Falha ao encerrar RadarOverlayService a partir do broadcast $action", e)
+                Log.e(TAG, "Falha ao iniciar RadarOverlayService a partir de $triggerAction", e)
             }
+        }
+    }
+
+    private fun stopServiceSilently(context: Context, triggerAction: String) {
+        Log.i(TAG, "Encerrando RadarOverlayService silenciosamente a partir de $triggerAction...")
+        try {
+            val stopIntent = Intent(context, RadarOverlayService::class.java).apply {
+                action = RadarOverlayService.ACTION_STOP
+            }
+            context.stopService(stopIntent)
+            Log.d(TAG, "RadarOverlayService encerrado com sucesso a partir de $triggerAction.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Falha ao encerrar RadarOverlayService a partir de $triggerAction", e)
         }
     }
 }
