@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./RadarLite_icon.png" width="128" height="128" alt="RadarLite Icon" />
+</p>
+
 # 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.0)
 
 [![Android](https://img.shields.io/badge/Android-8.0%2B%20(API%2026%2B)-3DDC84?logo=android&logoColor=white)](#)
