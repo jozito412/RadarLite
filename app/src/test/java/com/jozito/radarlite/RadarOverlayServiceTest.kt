@@ -335,5 +335,140 @@ class RadarOverlayServiceTest {
         assertTrue(RadarOverlayService.shouldIgnoreRadar(dnitRadar, blockOsmRadars = true, blacklistedIds = blacklistedSet))
         assertFalse(RadarOverlayService.shouldIgnoreRadar(osmRadar, blockOsmRadars = false, blacklistedIds = blacklistedSet))
     }
+
+    @Test
+    fun testFase10AreClonesConditions() {
+        // Base radar na Praça Tiradentes, Curitiba (-25.4284, -49.2733)
+        val baseRadar = RadarEntity(
+            id = 1L,
+            latitude = -25.4284,
+            longitude = -49.2733,
+            speedLimit = 60,
+            type = "FIXED",
+            bearing = 90.0,
+            source = "DNIT"
+        )
+
+        // 1. Proximidade: distância >= 35m (aprox. 50m ao norte) -> NÃO é clone
+        val farRadar = baseRadar.copy(
+            id = 2L,
+            latitude = -25.4284 + 0.00045, // ~50 metros de distância
+            longitude = -49.2733
+        )
+        assertFalse(RadarOverlayService.areClones(baseRadar, farRadar))
+
+        // 2. Mesma Regra: velocidade diferente (40 km/h marginal vs 60 km/h expressa a 15m) -> NÃO é clone
+        val diffSpeedRadar = baseRadar.copy(
+            id = 3L,
+            latitude = -25.4284 + 0.0001, // ~11 metros
+            speedLimit = 40
+        )
+        assertFalse(RadarOverlayService.areClones(baseRadar, diffSpeedRadar))
+
+        // 3. Mesmo Tipo: tipos diferentes (TRAFFIC_LIGHT vs FIXED no mesmo semáforo) -> NÃO é clone
+        val diffTypeRadar = baseRadar.copy(
+            id = 4L,
+            latitude = -25.4284 + 0.00005,
+            type = "TRAFFIC_LIGHT"
+        )
+        assertFalse(RadarOverlayService.areClones(baseRadar, diffTypeRadar))
+
+        // 4. Conflito de Direção:
+        // Caso 4a: Ambos possuem direção com diferença < 45° (90° vs 110°, diff 20°) -> É CLONE
+        val closeBearingRadar = baseRadar.copy(
+            id = 5L,
+            latitude = -25.4284 + 0.0001,
+            bearing = 110.0
+        )
+        assertTrue(RadarOverlayService.areClones(baseRadar, closeBearingRadar))
+
+        // Caso 4b: Ambos possuem direção com diferença >= 45° (90° vs 180°, diff 90° - sentido transversal/oposto) -> NÃO é clone
+        val diffBearingRadar = baseRadar.copy(
+            id = 6L,
+            latitude = -25.4284 + 0.0001,
+            bearing = 180.0
+        )
+        assertFalse(RadarOverlayService.areClones(baseRadar, diffBearingRadar))
+
+        // Caso 4c: Um deles não possui direção (bearing = null atua radialmente 360°) -> É CLONE
+        val nullBearingRadar = baseRadar.copy(
+            id = 7L,
+            latitude = -25.4284 + 0.0001,
+            bearing = null
+        )
+        assertTrue(RadarOverlayService.areClones(baseRadar, nullBearingRadar))
+
+        // Caso 4d: Ambos sem direção a 15 metros -> É CLONE
+        val nullBearingRadar2 = nullBearingRadar.copy(id = 8L, latitude = -25.4284 + 0.00012)
+        assertTrue(RadarOverlayService.areClones(nullBearingRadar, nullBearingRadar2))
+    }
+
+    @Test
+    fun testFase10DeduplicateRadarsSurvivalRules() {
+        // Cenário 1: Campeão com direção ganha de clone sem direção
+        val omniRadar = RadarEntity(
+            id = 10L,
+            latitude = -25.4284,
+            longitude = -49.2733,
+            speedLimit = 60,
+            type = "FIXED",
+            bearing = null,
+            source = "OSM"
+        )
+        val directionalRadar = RadarEntity(
+            id = 20L,
+            latitude = -25.4284 + 0.0001, // 11m
+            longitude = -49.2733,
+            speedLimit = 60,
+            type = "FIXED",
+            bearing = 90.0,
+            source = "DNIT"
+        )
+
+        // Testando independente da ordem de entrada na lista
+        val result1 = RadarOverlayService.deduplicateRadars(listOf(omniRadar, directionalRadar))
+        assertEquals(1, result1.size)
+        assertEquals(20L, result1[0].id) // directionalRadar é o campeão!
+
+        val result2 = RadarOverlayService.deduplicateRadars(listOf(directionalRadar, omniRadar))
+        assertEquals(1, result2.size)
+        assertEquals(20L, result2[0].id)
+
+        // Cenário 2: Se nenhum clone tiver direção, prioriza o source com '+' (dados enriquecidos)
+        val simpleOsm = omniRadar.copy(id = 30L, source = "OSM")
+        val enrichedOsm = omniRadar.copy(id = 40L, source = "OSM+")
+
+        val result3 = RadarOverlayService.deduplicateRadars(listOf(simpleOsm, enrichedOsm))
+        assertEquals(1, result3.size)
+        assertEquals(40L, result3[0].id) // enrichedOsm tem '+' e sobrevive!
+
+        // Cenário 3: Empate total (ambos sem direção, fontes sem '+') -> mantém o primeiro da lista
+        val tieFirst = omniRadar.copy(id = 50L, source = "OSM")
+        val tieSecond = omniRadar.copy(id = 60L, source = "OSM")
+
+        val result4 = RadarOverlayService.deduplicateRadars(listOf(tieFirst, tieSecond))
+        assertEquals(1, result4.size)
+        assertEquals(50L, result4[0].id) // primeiro da lista sobrevive!
+
+        // Cenário 4: Cruzamento complexo com sentidos opostos (0° e 180°) e um radar omnidirecional fantasma do OSM
+        val northRadar = RadarEntity(id = 100L, latitude = -25.4284, longitude = -49.2733, speedLimit = 60, type = "FIXED", bearing = 0.0, source = "DNIT")
+        val southRadar = RadarEntity(id = 200L, latitude = -25.4284 + 0.0001, longitude = -49.2733, speedLimit = 60, type = "FIXED", bearing = 180.0, source = "DNIT")
+        val ghostOmni = RadarEntity(id = 300L, latitude = -25.4284 + 0.00005, longitude = -49.2733, speedLimit = 60, type = "FIXED", bearing = null, source = "OSM")
+
+        val complexResult = RadarOverlayService.deduplicateRadars(listOf(northRadar, southRadar, ghostOmni))
+        assertEquals(2, complexResult.size)
+        assertTrue(complexResult.any { it.id == 100L }) // Sentido Norte preservado
+        assertTrue(complexResult.any { it.id == 200L }) // Sentido Sul preservado
+        assertFalse(complexResult.any { it.id == 300L }) // Fantasma omnidirecional removido!
+
+        // Cenário 5: Marginal lenta colada em via expressa rápida (não são clones por terem regras distintas)
+        val marginal40 = RadarEntity(id = 401L, latitude = -25.4284, longitude = -49.2733, speedLimit = 40, type = "FIXED", bearing = 90.0, source = "OSM")
+        val expressa80 = RadarEntity(id = 402L, latitude = -25.4284 + 0.0001, longitude = -49.2733, speedLimit = 80, type = "FIXED", bearing = 90.0, source = "OSM")
+
+        val speedsResult = RadarOverlayService.deduplicateRadars(listOf(marginal40, expressa80))
+        assertEquals(2, speedsResult.size)
+        assertTrue(speedsResult.any { it.id == 401L })
+        assertTrue(speedsResult.any { it.id == 402L })
+    }
 }
 

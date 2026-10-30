@@ -35,6 +35,9 @@ Você pode baixar diretamente o instalador compilado da versão 1.0:
 ### 2. ⚡ Desempenho e Blindagem Anti-Superaquecimento
 - **Cache Espacial em RAM (Anti-Throttling):**
   - O aplicativo realiza consultas ao banco Room em raios amplos de 15 km e mantém os radares em memória RAM. O banco só é reconsultado ao percorrer mais de 10 km, economizando 99% de I/O de disco e evitando o superaquecimento do smartphone ou da multimídia.
+- **Deduplicação Direcional & Heurística Tipo/Velocidade (Fase 10):**
+  - Elimina radares clones/duplicados em memória RAM com base na "impressão digital" (distância < 35m, mesmo limite de velocidade e mesmo tipo de radar).
+  - Regra do Campeão: preserva radares direcionais precisos eliminando clones omnidirecionais redundantes, preserva sentidos opostos e não confunde marginais lentas (ex: 40 km/h) coladas em vias expressas rápidas (ex: 80 km/h).
 - **Watchdog de Perda de GPS:**
   - Em túneis, garagens subterrâneas ou áreas de sombra, detecta ausência de sinal GPS por mais de 5 segundos, ocultando imediatamente alertas falsos e exibindo sinalizador discreto de busca por satélite.
 - **Serviço em Primeiro Plano Blindado:**

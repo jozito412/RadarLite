@@ -108,6 +108,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * Radar próximo identificado com cálculo de distância e alcance de alerta configurado.
@@ -232,6 +236,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         // Constantes do Caching Espacial em RAM (Anti-Superaquecimento)
         const val CACHE_RADIUS_METERS = 15_000.0 // 15 km
         const val CACHE_EXPIRATION_DISTANCE_METERS = 3_000f // 3 km (margem segura de revalidação)
+
+        // Constantes de Deduplicação em RAM (Fase 10)
+        const val DEDUPLICATION_RADIUS_METERS = 35.0
+        const val DEDUPLICATION_DIRECTION_CONFLICT_DEGREES = 45.0
 
         // Timeout de sinal do GPS (10.000ms tolerante a desvios urbanos sem perder túneis)
         const val GPS_TIMEOUT_MS = 10_000L
@@ -443,6 +451,138 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             }
             return false
         }
+
+        /**
+         * Calcula a distância em metros entre duas coordenadas geográficas utilizando a fórmula de Haversine.
+         * Pure Math: funciona tanto no Android quanto em testes unitários na JVM sem necessidade de mocks.
+         */
+        fun calculateDistanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+            val earthRadius = 6371000.0 // metros
+            val dLat = Math.toRadians(lat2 - lat1)
+            val dLon = Math.toRadians(lon2 - lon1)
+            val a = sin(dLat / 2) * sin(dLat / 2) +
+                    cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
+                    sin(dLon / 2) * sin(dLon / 2)
+            val c = 2 * atan2(sqrt(a), sqrt(1 - a))
+            return earthRadius * c
+        }
+
+        /**
+         * Calcula a menor diferença angular (0° a 180°) entre dois azimutes/direções de bússola.
+         */
+        fun calculateAngularDifference(angle1: Double, angle2: Double): Double {
+            val norm1 = ((angle1 % 360.0) + 360.0) % 360.0
+            val norm2 = ((angle2 % 360.0) + 360.0) % 360.0
+            val diff = abs(norm1 - norm2)
+            return if (diff > 180.0) 360.0 - diff else diff
+        }
+
+        /**
+         * Conflito de Direção (Fase 10):
+         * - Se ambos possuem direction_deg: a diferença angular entre eles é menor que 45 graus.
+         * - Se um ou ambos NÃO possuem direction_deg: são considerados clones (pois o ponto sem direção
+         *   já atua de forma radial 360º, tornando múltiplos pontos no mesmo raio redundantes).
+         */
+        fun hasDirectionConflict(bearingA: Double?, bearingB: Double?): Boolean {
+            if (bearingA != null && bearingB != null) {
+                val angleDiff = calculateAngularDifference(bearingA, bearingB)
+                return angleDiff < DEDUPLICATION_DIRECTION_CONFLICT_DEGREES
+            }
+            return true
+        }
+
+        /**
+         * Identifica se um radar B é considerado clone de um radar A (Fase 10).
+         * Atende a todas as condições simultaneamente:
+         * 1. Proximidade: Distância entre eles é menor que 35 metros (< 35.0).
+         * 2. Mesma Regra: Possuem o mesmo limit_kmh (speedLimit).
+         * 3. Mesmo Tipo: Possuem o mesmo kind (type, ex: ambos FIXED ou ambos TRAFFIC_LIGHT).
+         * 4. Conflito de Direção: ambos com direção dif < 45°, ou pelo menos um sem direção.
+         */
+        fun areClones(a: RadarEntity, b: RadarEntity): Boolean {
+            // 2. Mesma Regra: mesmo speedLimit (salva marginais lentas coladas em vias expressas)
+            if (a.speedLimit != b.speedLimit) {
+                return false
+            }
+
+            // 3. Mesmo Tipo: mesmo kind (FIXED, TRAFFIC_LIGHT, etc.)
+            if (!a.type.trim().equals(b.type.trim(), ignoreCase = true)) {
+                return false
+            }
+
+            // Bounding box prévio para alta performance antes do cálculo trigonométrico
+            val latDiff = abs(a.latitude - b.latitude)
+            if (latDiff > 0.0005) {
+                return false
+            }
+            val lonDiff = abs(a.longitude - b.longitude)
+            if (lonDiff > 0.0006) {
+                return false
+            }
+
+            // 1. Proximidade: distância < 35 metros
+            val distance = calculateDistanceMeters(a.latitude, a.longitude, b.latitude, b.longitude)
+            if (distance >= DEDUPLICATION_RADIUS_METERS) {
+                return false
+            }
+
+            // 4. Conflito de Direção
+            return hasDirectionConflict(a.bearing, b.bearing)
+        }
+
+        /**
+         * Fase 10: Algoritmo de Deduplicação Robusto em RAM.
+         *
+         * Agrupa os radares usando uma "Impressão Digital" (Distância + Tipo + Limite de Velocidade)
+         * para garantir que cruzamentos complexos não percam alertas vitais.
+         *
+         * Regra de Sobrevivência (O Campeão):
+         * - Ao encontrar clones, mantenha na lista o radar que tiver a coluna direction_deg preenchida
+         *   (pois ele permite o cálculo preciso do cone de visão para evitar falsos positivos nas ruas transversais).
+         * - Se nenhum dos clones tiver direção, priorize o que tiver o source com o caractere '+' (dados enriquecidos).
+         * - Em caso de empate total, mantenha o primeiro.
+         */
+        fun deduplicateRadars(radars: List<RadarEntity>): List<RadarEntity> {
+            if (radars.size <= 1) return radars
+
+            // Indexa e ordena os radares por prioridade de campeão:
+            val indexedRadars = radars.withIndex().sortedWith { a, b ->
+                val aHasBearing = a.value.bearing != null
+                val bHasBearing = b.value.bearing != null
+                if (aHasBearing != bHasBearing) {
+                    return@sortedWith if (aHasBearing) -1 else 1
+                }
+
+                val aHasPlus = a.value.source?.contains("+") == true
+                val bHasPlus = b.value.source?.contains("+") == true
+                if (aHasPlus != bHasPlus) {
+                    return@sortedWith if (aHasPlus) -1 else 1
+                }
+
+                a.index.compareTo(b.index)
+            }
+
+            val survivingIndexed = mutableListOf<IndexedValue<RadarEntity>>()
+
+            for (candidate in indexedRadars) {
+                val isCloneOfExisting = survivingIndexed.any { survivor ->
+                    areClones(candidate.value, survivor.value)
+                }
+                if (!isCloneOfExisting) {
+                    survivingIndexed.add(candidate)
+                }
+            }
+
+            // Retorna os sobreviventes preservando a ordem original da lista
+            return survivingIndexed.sortedBy { it.index }.map { it.value }
+        }
+    }
+
+    /**
+     * Encaminhador de instância para a função de deduplicação da Fase 10.
+     */
+    fun deduplicateRadars(radars: List<RadarEntity>): List<RadarEntity> {
+        return Companion.deduplicateRadars(radars)
     }
 
     override fun onCreate() {
@@ -1373,13 +1513,15 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                 Log.w(TAG, "Banco de radares vazio! Populando base de fábrica dos assets imediatamente...")
                 RadarDatabase.populateFactoryRadarsSync(applicationContext, radarDao)
             }
-            cachedRadars = radarDao.getRadarsWithinRadius(
+            val rawRadars = radarDao.getRadarsWithinRadius(
                 latitude = location.latitude,
                 longitude = location.longitude,
                 radiusInMeters = CACHE_RADIUS_METERS
             )
+            // Fase 10: Deduplicação Direcional e Heurística de Tipo/Velocidade em RAM
+            cachedRadars = deduplicateRadars(rawRadars)
             lastQueryLocation = Location(location)
-            Log.d(TAG, "Cache espacial atualizado com ${cachedRadars.size} radares.")
+            Log.d(TAG, "Cache espacial atualizado com ${cachedRadars.size} radares (após deduplicação de ${rawRadars.size} brutos).")
         }
         return cachedRadars
     }
