@@ -43,12 +43,17 @@ Você pode baixar diretamente o instalador compilado da versão 1.0:
 - **Serviço em Primeiro Plano Blindado:**
   - Foreground Service prioritário com notificação permanente, protegido contra fechamento indevido pelo sistema operacional.
 
-### 3. 🚗 Automação Veicular (Bluetooth Auto-Start / Auto-Stop)
-- **Hands-Free Total:**
+### 3. 🚗 Automação Veicular & Integração Remota (Bluetooth & CoolantHUD)
+- **Hands-Free Total via Bluetooth:**
   - Selecione o dispositivo Bluetooth do som ou multimídia do seu veículo nas configurações.
   - Ao ligar o carro e conectar no Bluetooth, o RadarLite inicia o serviço flutuante automaticamente.
   - Ao desligar o veículo e desconectar, o serviço é pausado e liberado para economizar bateria.
   - Mecanismo de verificação ativa com *heartbeat* para impedir interrupções indesejadas em saídas rápidas do carro.
+- **Controle Remoto via Broadcast (CoolantHUD / Launchers Customizados):**
+  - O aplicativo exporta comandos públicos via `AutostartReceiver` (`android:exported="true"`), permitindo ligar e desligar o `RadarOverlayService` remotamente:
+    - **Ligar Overlay:** Envie um broadcast com a action `"com.jozito412.radarlite.ACTION_START"`.
+    - **Desligar Overlay:** Envie um broadcast com a action `"com.jozito412.radarlite.ACTION_STOP"`.
+  - Possui trava lógica de concorrência (`startLock`) que evita inicializações duplicadas caso o serviço já esteja em execução.
 
 ### 4. 🛡️ Curadoria Manual & Blacklist Híbrida (Fases 9, 9.1, 9.2 & 9.3)
 - **Blacklist Híbrida com Gestos Inteligentes (Fase 9.3):**

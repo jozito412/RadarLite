@@ -27,6 +27,10 @@ class AutostartReceiverTest {
         // QuickBoot automotivo (ignição do veículo ligada)
         assertTrue(AutostartReceiver.isAutostartAction("android.intent.action.QUICKBOOT_POWERON"))
         assertTrue(AutostartReceiver.isAutostartAction("com.htc.intent.action.QUICKBOOT_POWERON"))
+
+        // Controle remoto por Launcher customizado (ex: CoolantHUD)
+        assertEquals("com.jozito412.radarlite.ACTION_START", AutostartReceiver.ACTION_START)
+        assertTrue(AutostartReceiver.isAutostartAction(AutostartReceiver.ACTION_START))
     }
 
     @Test
@@ -51,6 +55,10 @@ class AutostartReceiverTest {
         // Desconexão do som do carro (Bluetooth desconectado) deve disparar auto-stop
         assertTrue(AutostartReceiver.isAutostopAction(BluetoothDevice.ACTION_ACL_DISCONNECTED))
 
+        // Controle remoto por Launcher customizado (ex: CoolantHUD)
+        assertEquals("com.jozito412.radarlite.ACTION_STOP", AutostartReceiver.ACTION_STOP)
+        assertTrue(AutostartReceiver.isAutostopAction(AutostartReceiver.ACTION_STOP))
+
         // Outras ações não devem acionar auto-stop
         assertFalse(AutostartReceiver.isAutostopAction(BluetoothDevice.ACTION_ACL_CONNECTED))
         assertFalse(AutostartReceiver.isAutostopAction(Intent.ACTION_BOOT_COMPLETED))
@@ -59,17 +67,20 @@ class AutostartReceiverTest {
 
     @Test
     fun testConcurrencyLockAndMultipleBluetoothPrevention() {
-        // Se o serviço não está rodando, a conexão Bluetooth dispara o início do serviço
+        // Se o serviço não está rodando, a conexão Bluetooth ou comando customizado dispara o início do serviço
         assertTrue(AutostartReceiver.shouldStartService(BluetoothDevice.ACTION_ACL_CONNECTED, isServiceRunning = false))
         assertTrue(AutostartReceiver.shouldStartService(Intent.ACTION_BOOT_COMPLETED, isServiceRunning = false))
+        assertTrue(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_START, isServiceRunning = false))
 
-        // Trava lógica: Se o serviço JÁ ESTÁ RODANDO (ex: múltiplos dispositivos Bluetooth conectando simultaneamente),
+        // Trava lógica: Se o serviço JÁ ESTÁ RODANDO (ex: múltiplos disparos simultâneos ou launcher re-enviando comando),
         // o receptor descarta novos disparos para evitar concorrência e exceções
         assertFalse(AutostartReceiver.shouldStartService(BluetoothDevice.ACTION_ACL_CONNECTED, isServiceRunning = true))
         assertFalse(AutostartReceiver.shouldStartService(Intent.ACTION_BOOT_COMPLETED, isServiceRunning = true))
+        assertFalse(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_START, isServiceRunning = true))
 
         // Ações inválidas não devem iniciar mesmo se o serviço estiver parado
         assertFalse(AutostartReceiver.shouldStartService(BluetoothDevice.ACTION_ACL_DISCONNECTED, isServiceRunning = false))
+        assertFalse(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_STOP, isServiceRunning = false))
         assertFalse(AutostartReceiver.shouldStartService(null, isServiceRunning = false))
     }
 

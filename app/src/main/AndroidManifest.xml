@@ -58,6 +58,9 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                <!-- Ações para controle remoto via Launchers / CoolantHUD -->
+                <action android:name="com.jozito412.radarlite.ACTION_START" />
+                <action android:name="com.jozito412.radarlite.ACTION_STOP" />
             </intent-filter>
         </receiver>
     </application>

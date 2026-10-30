@@ -22,6 +22,12 @@ class AutostartReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "AutostartReceiver"
 
+        // Ações customizadas para controle remoto por launchers ou apps externos (ex: CoolantHUD)
+        const val ACTION_START = "com.jozito412.radarlite.ACTION_START"
+        const val ACTION_STOP = "com.jozito412.radarlite.ACTION_STOP"
+        const val ACTION_CUSTOM_START = ACTION_START
+        const val ACTION_CUSTOM_STOP = ACTION_STOP
+
         // Objeto de trava de concorrência para múltiplos disparos simultâneos (ex: múltiplos dispositivos Bluetooth)
         private val startLock = Any()
 
@@ -46,7 +52,8 @@ class AutostartReceiver : BroadcastReceiver() {
                     action == BluetoothDevice.ACTION_ACL_CONNECTED ||
                     action == ACTION_QUICKBOOT_POWERON ||
                     action == ACTION_HTC_QUICKBOOT_POWERON ||
-                    action == Intent.ACTION_MY_PACKAGE_REPLACED
+                    action == Intent.ACTION_MY_PACKAGE_REPLACED ||
+                    action == ACTION_START
         }
 
         /**
@@ -98,10 +105,11 @@ class AutostartReceiver : BroadcastReceiver() {
 
         /**
          * Verifica se a ação recebida é um gatilho de desligamento automático (Auto-Stop).
-         * Desconectar do som do carro (Bluetooth) desativa o serviço para poupar bateria e RAM.
+         * Desconectar do som do carro (Bluetooth) ou comando externo customizado encerra o serviço.
          */
         fun isAutostopAction(action: String?): Boolean {
-            return action == BluetoothDevice.ACTION_ACL_DISCONNECTED
+            return action == BluetoothDevice.ACTION_ACL_DISCONNECTED ||
+                    action == ACTION_STOP
         }
 
         /**
@@ -155,35 +163,35 @@ class AutostartReceiver : BroadcastReceiver() {
             }
         }
 
-        if (isAutostartIntent(intent)) {
-            // Trava lógica contra concorrência e múltiplos disparos Bluetooth simultâneos
+        if (action == ACTION_START || isAutostartIntent(intent)) {
+            // Trava lógica contra concorrência e múltiplos disparos simultâneos
             synchronized(startLock) {
                 if (RadarOverlayService.isRunning.value) {
                     Log.d(TAG, "RadarOverlayService já está em execução. Ignorando gatilho de autostart duplicado ($action).")
                     return
                 }
 
-                Log.i(TAG, "Gatilho de autostart veicular detectado ($action). Inicializando RadarOverlayService...")
+                Log.i(TAG, "Gatilho de inicialização detectado ($action). Inicializando RadarOverlayService...")
 
                 val serviceIntent = createServiceIntent(context)
 
                 try {
                     // Inicia o serviço como Foreground Service usando ContextCompat
                     ContextCompat.startForegroundService(context, serviceIntent)
-                    Log.d(TAG, "RadarOverlayService iniciado com sucesso.")
+                    Log.d(TAG, "RadarOverlayService iniciado com sucesso a partir de $action.")
                 } catch (e: Exception) {
                     Log.e(TAG, "Falha ao iniciar RadarOverlayService a partir do broadcast $action", e)
                 }
             }
-        } else if (isAutostopIntent(intent)) {
-            Log.i(TAG, "Gatilho de autostop veicular detectado ($action - Bluetooth desconectado). Encerrando RadarOverlayService...")
+        } else if (action == ACTION_STOP || isAutostopIntent(intent)) {
+            Log.i(TAG, "Gatilho de parada detectado ($action). Encerrando RadarOverlayService...")
 
             try {
                 val stopIntent = Intent(context, RadarOverlayService::class.java).apply {
                     setAction(RadarOverlayService.ACTION_STOP)
                 }
                 context.stopService(stopIntent)
-                Log.d(TAG, "RadarOverlayService encerrado com sucesso ao desconectar do Bluetooth.")
+                Log.d(TAG, "RadarOverlayService encerrado com sucesso a partir do broadcast $action.")
             } catch (e: Exception) {
                 Log.e(TAG, "Falha ao encerrar RadarOverlayService a partir do broadcast $action", e)
             }
