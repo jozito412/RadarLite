@@ -38,6 +38,10 @@ Você pode baixar diretamente o instalador compilado da versão 1.0:
 - **Deduplicação Direcional & Heurística Tipo/Velocidade (Fase 10):**
   - Elimina radares clones/duplicados em memória RAM com base na "impressão digital" (distância < 35m, mesmo limite de velocidade e mesmo tipo de radar).
   - Regra do Campeão: preserva radares direcionais precisos eliminando clones omnidirecionais redundantes, preserva sentidos opostos e não confunde marginais lentas (ex: 40 km/h) coladas em vias expressas rápidas (ex: 80 km/h).
+- **Inteligência em Curvas & Vetor de Afastamento:**
+  - **Filtro de Afastamento (Range Rate):** Detecta se a distância para o radar começou a subir ($D_{\text{atual}} > D_{\text{anterior}} + 3\text{m}$). Se o motorista virar a esquina ou ultrapassar o ponto, o alerta é cancelado instantaneamente no primeiro segundo da curva.
+  - **Cone Frontal Adaptativo:** Reduz o cone para 55° em radares omnidirecionais (360°) e 60° no trânsito urbano ($\le 60\text{ km/h}$) para eliminar postes de ruas perpendiculares a 90°, mantendo 85° apenas em rodovias para curvas de alta velocidade.
+  - **Produto Escalar de Aproximação (Dot Product):** Valida se o vetor velocidade $\vec{v}$ do carro se projeta em rota de aproximação positiva ($\cos(\Delta\theta) > 0$), eliminando alertas em vias transversais.
 - **Watchdog de Perda de GPS:**
   - Em túneis, garagens subterrâneas ou áreas de sombra, detecta ausência de sinal GPS por mais de 5 segundos, ocultando imediatamente alertas falsos e exibindo sinalizador discreto de busca por satélite.
 - **Serviço em Primeiro Plano Blindado:**

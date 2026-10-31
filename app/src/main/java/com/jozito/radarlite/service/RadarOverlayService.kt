@@ -176,6 +176,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     // Controle de cooldown de 15 segundos por radar (radar.id -> timestamp em milissegundos)
     private val radarAlertCooldowns = ConcurrentHashMap<Long, Long>()
 
+    // Histórico de distâncias para o Filtro de Afastamento (Melhoria 1: Anti-Falsos Positivos em Curvas e Cruzamentos)
+    // radar.id -> última distância em metros
+    private val radarDistanceHistory = ConcurrentHashMap<Long, Float>()
+
     // Modo Standby em parada prolongada (velocidade zero por mais de 5 minutos contínuos)
     private var stoppedStartTime: Long? = null
     private var isStandbyMode: Boolean = false
@@ -382,17 +386,32 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         }
 
         /**
-         * Implementa o "Cone de Visão Frontal":
+         * Retorna o ângulo máximo adaptativo do cone frontal (Melhoria 2):
+         * - Radar sem direção (360°/OSM): 55° (elimina postes na via perpendicular em curvas de 90°).
+         * - Tráfego urbano (<= 60 km/h): 60° (cobre curvas de esquinas descartando vias cruzadas).
+         * - Rodovia (> 60 km/h): 85° (mantém o cone amplo para curvas de alta velocidade e raios longos).
+         */
+        fun getAdaptiveFrontConeAngle(currentSpeedKmh: Float, hasDirection: Boolean): Float {
+            return when {
+                !hasDirection -> 55.0f
+                currentSpeedKmh <= 60.0f -> 60.0f
+                else -> 85.0f
+            }
+        }
+
+        /**
+         * Implementa o "Cone de Visão Frontal Adaptativo":
          * Se o veículo tiver uma direção conhecida (effectiveBearing != null):
          * - Calcula a diferença entre a direção de deslocamento e o vetor até o radar.
-         * - Se angleDiff >= 85 graus, o radar já foi ultrapassado (está de costas para o carro) e é descartado.
+         * - Se angleDiff >= maxAngleDegrees, o radar já foi ultrapassado ou está fora da via atual e é descartado.
          * Se a direção for desconhecida (carro acabou de ligar e ainda não se moveu):
          * - Aceita o radar (retorna true) para não descartar radares erroneamente por presumir Norte (0°).
          */
         fun isInFrontOfVehicle(
             vehicleLocation: Location,
             radarLocation: Location,
-            effectiveBearing: Float? = null
+            effectiveBearing: Float? = null,
+            maxAngleDegrees: Float = 85.0f
         ): Boolean {
             val bearing = effectiveBearing ?: if (vehicleLocation.hasBearing() && vehicleLocation.bearing != 0.0f) {
                 vehicleLocation.bearing
@@ -408,7 +427,45 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
             val bearingToRadar = vehicleLocation.bearingTo(radarLocation)
             val angleDiff = calculateRelativeAngleDiff(bearing, bearingToRadar)
-            return angleDiff < 85f
+            return angleDiff < maxAngleDegrees
+        }
+
+        /**
+         * Melhoria 3: Calcula o produto escalar (Dot Product) normalizado entre o vetor de velocidade e o vetor do radar.
+         * Retorna cos(Δθ).
+         * - 1.0: apontando diretamente para o radar.
+         * - 0.5: desvio de 60°.
+         * - 0.0: radar perpendicular a 90° (transversal).
+         * - < 0.0: radar nas costas ou se afastando.
+         */
+        fun calculateApproximationDotProduct(vehicleBearing: Float, bearingToRadar: Float): Double {
+            val angleDiffRad = Math.toRadians(calculateRelativeAngleDiff(vehicleBearing, bearingToRadar).toDouble())
+            return cos(angleDiffRad)
+        }
+
+        /**
+         * Determina se o vetor de deslocamento do carro se projeta positivamente na direção do radar.
+         */
+        fun isMovingTowardsRadar(
+            vehicleBearing: Float,
+            bearingToRadar: Float,
+            minProjection: Double = 0.17 // cos(80°) ~ 0.17
+        ): Boolean {
+            val dot = calculateApproximationDotProduct(vehicleBearing, bearingToRadar)
+            return dot >= minProjection
+        }
+
+        /**
+         * Melhoria 1: Verifica se o veículo está se afastando do radar com base na distância da leitura anterior.
+         * Se a distância atual for maior que a anterior + tolerância de histerese (3.0m), retorna true.
+         */
+        fun isRecedingFromRadar(
+            currentDistanceMeters: Float,
+            previousDistanceMeters: Float?,
+            hysteresisMeters: Float = 3.0f
+        ): Boolean {
+            if (previousDistanceMeters == null) return false
+            return currentDistanceMeters > (previousDistanceMeters + hysteresisMeters)
         }
 
         /**
@@ -1901,14 +1958,22 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
             val distanceMeters = location.distanceTo(radarLocation)
 
+            // Melhoria 1: Vetor de Afastamento (Detecção de Distância Aumentando)
+            // Se o veículo estiver em movimento (>= 5 km/h) e a distância estiver aumentando além da tolerância,
+            // significa que o carro fez uma curva / virou a esquina ou passou do radar. Descarta o alerta imediatamente.
+            if (speedKmh >= 5.0f && isRecedingFromRadar(distanceMeters, radarDistanceHistory[radar.id])) {
+                radarDistanceHistory.remove(radar.id)
+                continue
+            }
+
             // Fase 11: timeToCollision = distanceMeters / speedMs
             val timeToCollision = distanceMeters / speedMs
 
             // Regra de Disparo TTC: timeToCollision <= dynamicAlertLimit
             if (timeToCollision <= dynamicAlertLimit) {
-                // 1. Verificação de Ângulo Relativo: Cone de Visão Frontal (170 graus à frente)
-                // Descarta imediatamente se angleDiff >= 85 (radar ultrapassado ou nas costas do carro)
-                val isFront = isInFrontOfVehicle(location, radarLocation, effectiveVehicleBearing)
+                // Melhoria 2: Cone Frontal Adaptativo (55° para radar 360°, 60° na cidade <= 60 km/h, 85° em rodovia)
+                val adaptiveFrontCone = getAdaptiveFrontConeAngle(speedKmh, radar.bearing != null)
+                val isFront = isInFrontOfVehicle(location, radarLocation, effectiveVehicleBearing, adaptiveFrontCone)
 
                 if (isFront) {
                     // 2. Verificação de Sentido da Via (+/- 30 graus para radares com bearing não-nulo)
@@ -1919,31 +1984,41 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                     )
 
                     if (inDirection) {
-                        val isAggressive = (timeToCollision <= aggressiveAlertTime.toDouble()) && (speedKmh > radar.speedLimit)
-                        matchingRadars.add(
-                            NearbyRadar(
-                                radar = radar,
-                                distanceMeters = distanceMeters,
-                                alertDistanceMeters = (dynamicAlertLimit * speedMs).toFloat(),
-                                timeToCollisionSec = timeToCollision.toDouble(),
-                                isAggressiveAlert = isAggressive
+                        // Melhoria 3: Produto Escalar de Aproximação (Dot Product)
+                        val bearingToRadar = location.bearingTo(radarLocation)
+                        val heading = effectiveVehicleBearing ?: location.bearing
+                        val isPositiveProjection = isMovingTowardsRadar(heading, bearingToRadar)
+
+                        if (isPositiveProjection) {
+                            // Registra/atualiza a menor distância no histórico de aproximação
+                            radarDistanceHistory[radar.id] = distanceMeters
+
+                            val isAggressive = (timeToCollision <= aggressiveAlertTime.toDouble()) && (speedKmh > radar.speedLimit)
+                            matchingRadars.add(
+                                NearbyRadar(
+                                    radar = radar,
+                                    distanceMeters = distanceMeters,
+                                    alertDistanceMeters = (dynamicAlertLimit * speedMs).toFloat(),
+                                    timeToCollisionSec = timeToCollision.toDouble(),
+                                    isAggressiveAlert = isAggressive
+                                )
                             )
-                        )
 
-                        val warnOnlyOverSpeed = preferencesManager.warnOnlyOverSpeed
-                        val alertSpeedThreshold = if (warnOnlyOverSpeed) {
-                            radar.speedLimit.toFloat()
-                        } else {
-                            0.9f * radar.speedLimit
-                        }
+                            val warnOnlyOverSpeed = preferencesManager.warnOnlyOverSpeed
+                            val alertSpeedThreshold = if (warnOnlyOverSpeed) {
+                                radar.speedLimit.toFloat()
+                            } else {
+                                0.9f * radar.speedLimit
+                            }
 
-                        if (speedKmh >= alertSpeedThreshold) {
-                            val lastAlertTime = radarAlertCooldowns[radar.id] ?: 0L
-                            if (now - lastAlertTime >= COOLDOWN_DURATION_MS) {
-                                radarAlertCooldowns[radar.id] = now
-                                if (preferencesManager.isSoundEnabled) {
-                                    shouldTriggerSound = true
-                                    Log.d(TAG, "ALERTA SONORO: Radar ID ${radar.id} (${radar.speedLimit} km/h) a ${distanceMeters.toInt()}m (TTC: ${timeToCollision.toInt()}s). Vel: ${speedKmh.toInt()} km/h")
+                            if (speedKmh >= alertSpeedThreshold) {
+                                val lastAlertTime = radarAlertCooldowns[radar.id] ?: 0L
+                                if (now - lastAlertTime >= COOLDOWN_DURATION_MS) {
+                                    radarAlertCooldowns[radar.id] = now
+                                    if (preferencesManager.isSoundEnabled) {
+                                        shouldTriggerSound = true
+                                        Log.d(TAG, "ALERTA SONORO: Radar ID ${radar.id} (${radar.speedLimit} km/h) a ${distanceMeters.toInt()}m (TTC: ${timeToCollision.toInt()}s). Vel: ${speedKmh.toInt()} km/h")
+                                    }
                                 }
                             }
                         }
@@ -1951,6 +2026,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                 }
             }
         }
+
+        // Mantém no histórico apenas os radares que continuam ativos no campo de visão
+        val currentNearbyIds = matchingRadars.map { it.radar.id }.toSet()
+        radarDistanceHistory.keys.retainAll(currentNearbyIds)
 
         val sortedAlerts = matchingRadars.sortedBy { it.distanceMeters }
         _nearbyRadars.value = sortedAlerts
@@ -2023,8 +2102,9 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             val timeToCollision = distanceMeters / speedMs
 
             if (timeToCollision <= dynamicAlertLimit) {
-                // 1. Verificação de Ângulo Relativo: Cone de Visão Frontal (170 graus)
-                val isFront = isInFrontOfVehicle(location, radarLocation, effectiveVehicleBearing)
+                // Melhoria 2: Cone Frontal Adaptativo (55° para radar 360°, 60° na cidade <= 60 km/h, 85° em rodovia)
+                val adaptiveFrontCone = getAdaptiveFrontConeAngle(speedKmh, radar.bearing != null)
+                val isFront = isInFrontOfVehicle(location, radarLocation, effectiveVehicleBearing, adaptiveFrontCone)
 
                 if (isFront) {
                     // 2. Verificação de Sentido da Via
@@ -2035,16 +2115,23 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                     )
 
                     if (matchesDirection) {
-                        val isAggressive = (timeToCollision <= aggressiveAlertTime.toDouble()) && (speedKmh > radar.speedLimit)
-                        matchingRadars.add(
-                            NearbyRadar(
-                                radar = radar,
-                                distanceMeters = distanceMeters,
-                                alertDistanceMeters = (dynamicAlertLimit * speedMs).toFloat(),
-                                timeToCollisionSec = timeToCollision.toDouble(),
-                                isAggressiveAlert = isAggressive
+                        // Melhoria 3: Produto Escalar de Aproximação (Dot Product)
+                        val bearingToRadar = location.bearingTo(radarLocation)
+                        val heading = effectiveVehicleBearing ?: location.bearing
+                        val isPositiveProjection = isMovingTowardsRadar(heading, bearingToRadar)
+
+                        if (isPositiveProjection) {
+                            val isAggressive = (timeToCollision <= aggressiveAlertTime.toDouble()) && (speedKmh > radar.speedLimit)
+                            matchingRadars.add(
+                                NearbyRadar(
+                                    radar = radar,
+                                    distanceMeters = distanceMeters,
+                                    alertDistanceMeters = (dynamicAlertLimit * speedMs).toFloat(),
+                                    timeToCollisionSec = timeToCollision.toDouble(),
+                                    isAggressiveAlert = isAggressive
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }

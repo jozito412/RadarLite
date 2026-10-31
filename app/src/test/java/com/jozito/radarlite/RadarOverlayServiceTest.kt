@@ -640,5 +640,59 @@ class RadarOverlayServiceTest {
         assertEquals(185, normalizeDegrees(185.2))
         assertEquals(355, normalizeDegrees(-5.0))
     }
+
+    @Test
+    fun testRecedingRadarFilter() {
+        // Cenário 1: Primeira detecção (previousDistance == null) -> NÃO está se afastando
+        assertFalse(RadarOverlayService.isRecedingFromRadar(currentDistanceMeters = 100f, previousDistanceMeters = null))
+
+        // Cenário 2: Aproximação normal (distância diminuindo de 120m para 100m) -> NÃO está se afastando
+        assertFalse(RadarOverlayService.isRecedingFromRadar(currentDistanceMeters = 100f, previousDistanceMeters = 120f))
+
+        // Cenário 3: Jitter milimétrico do GPS (aumento de apenas 1 metro, dentro da histerese de 3m) -> NÃO descarta por ruído
+        assertFalse(RadarOverlayService.isRecedingFromRadar(currentDistanceMeters = 101f, previousDistanceMeters = 100f))
+
+        // Cenário 4: Carro fez curva e começou a se distanciar (distância subiu de 100m para 108m, > 3m) -> ESTÁ SE AFASTANDO!
+        assertTrue(RadarOverlayService.isRecedingFromRadar(currentDistanceMeters = 108f, previousDistanceMeters = 100f))
+        assertTrue(RadarOverlayService.isRecedingFromRadar(currentDistanceMeters = 104f, previousDistanceMeters = 100f))
+    }
+
+    @Test
+    fun testAdaptiveFrontConeAngles() {
+        // 1. Radar sem direção cadastrada (OSM/360°) -> cone restrito de 55° para não pegar ruas transversais
+        assertEquals(55.0f, RadarOverlayService.getAdaptiveFrontConeAngle(currentSpeedKmh = 40f, hasDirection = false), 0.001f)
+        assertEquals(55.0f, RadarOverlayService.getAdaptiveFrontConeAngle(currentSpeedKmh = 100f, hasDirection = false), 0.001f)
+
+        // 2. Cidade (<= 60 km/h) com radar direcionado -> cone de 60° (elimina esquinas fechadas de 90°)
+        assertEquals(60.0f, RadarOverlayService.getAdaptiveFrontConeAngle(currentSpeedKmh = 40f, hasDirection = true), 0.001f)
+        assertEquals(60.0f, RadarOverlayService.getAdaptiveFrontConeAngle(currentSpeedKmh = 60f, hasDirection = true), 0.001f)
+
+        // 3. Rodovia (> 60 km/h) -> cone de 85° para cobrir curvas de alta velocidade
+        assertEquals(85.0f, RadarOverlayService.getAdaptiveFrontConeAngle(currentSpeedKmh = 80f, hasDirection = true), 0.001f)
+        assertEquals(85.0f, RadarOverlayService.getAdaptiveFrontConeAngle(currentSpeedKmh = 110f, hasDirection = true), 0.001f)
+    }
+
+    @Test
+    fun testApproximationDotProductAndTrajectoryProjection() {
+        // 1. Veículo apontando diretamente para o radar (0°): cos(0) = 1.0 -> aproximação máxima
+        val dotDirect = RadarOverlayService.calculateApproximationDotProduct(vehicleBearing = 0f, bearingToRadar = 0f)
+        assertEquals(1.0, dotDirect, 0.001)
+        assertTrue(RadarOverlayService.isMovingTowardsRadar(vehicleBearing = 0f, bearingToRadar = 0f))
+
+        // 2. Curva moderada de 45°: cos(45°) ~ 0.707 -> ainda se projeta em aproximação
+        val dot45 = RadarOverlayService.calculateApproximationDotProduct(vehicleBearing = 45f, bearingToRadar = 0f)
+        assertEquals(0.707, dot45, 0.01)
+        assertTrue(RadarOverlayService.isMovingTowardsRadar(vehicleBearing = 45f, bearingToRadar = 0f))
+
+        // 3. Virou esquina de 90° na transversal: cos(90°) = 0.0 -> não há aproximação frontal
+        val dot90 = RadarOverlayService.calculateApproximationDotProduct(vehicleBearing = 90f, bearingToRadar = 0f)
+        assertEquals(0.0, dot90, 0.01)
+        assertFalse(RadarOverlayService.isMovingTowardsRadar(vehicleBearing = 90f, bearingToRadar = 0f))
+
+        // 4. Carro virou na contramão ou sentido oposto (180°): cos(180°) = -1.0 -> afastamento total
+        val dot180 = RadarOverlayService.calculateApproximationDotProduct(vehicleBearing = 180f, bearingToRadar = 0f)
+        assertEquals(-1.0, dot180, 0.01)
+        assertFalse(RadarOverlayService.isMovingTowardsRadar(vehicleBearing = 180f, bearingToRadar = 0f))
+    }
 }
 
