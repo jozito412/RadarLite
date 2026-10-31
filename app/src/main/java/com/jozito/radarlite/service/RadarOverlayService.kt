@@ -55,6 +55,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.North
+import androidx.compose.ui.draw.rotate
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -114,16 +116,19 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Radar próximo identificado com cálculo de distância e alcance de alerta configurado.
+ * Radar próximo identificado com cálculo de distância, tempo de colisão (TTC) e alcance de alerta configurado.
  */
 data class NearbyRadar(
     val radar: RadarEntity,
     val distanceMeters: Float,
-    val alertDistanceMeters: Float = 500f
+    val alertDistanceMeters: Float = 500f,
+    val timeToCollisionSec: Double = 0.0,
+    val isAggressiveAlert: Boolean = false
 )
 
 /**
@@ -404,6 +409,55 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             val bearingToRadar = vehicleLocation.bearingTo(radarLocation)
             val angleDiff = calculateRelativeAngleDiff(bearing, bearingToRadar)
             return angleDiff < 85f
+        }
+
+        /**
+         * Fase 11: Calcula o Tempo de Colisão (TTC) em segundos a partir da velocidade atual do carro.
+         * Se o carro estiver a menos de 10 km/h, assume 10 km/h para evitar divisão por zero ou avisos infinitos.
+         */
+        fun calculateTimeToCollision(distanceMeters: Double, currentSpeedKmh: Float): Double {
+            val effectiveSpeedKmh = if (currentSpeedKmh < 10f) 10f else currentSpeedKmh
+            val speedMs = effectiveSpeedKmh / 3.6
+            return distanceMeters / speedMs
+        }
+
+        /**
+         * Fase 11: Curva de Tempo Variável (Dynamic Alert Limit).
+         * - Se currentSpeedKmh > 90 km/h -> 15.0s (escalado por baseAlertTime)
+         * - Se currentSpeedKmh > 60 km/h -> 12.0s
+         * - Menos de 60 km/h (cidade) -> 9.0s
+         */
+        fun calculateDynamicAlertLimit(currentSpeedKmh: Float, baseAlertTime: Int = PreferencesManager.DEFAULT_BASE_ALERT_TIME): Double {
+            val factor = baseAlertTime.toDouble() / 15.0
+            val baseSec = if (currentSpeedKmh > 90f) 15.0 else if (currentSpeedKmh > 60f) 12.0 else 9.0
+            return baseSec * factor
+        }
+
+        /**
+         * Fase 11: Verifica se o veículo entrou na zona de alerta dinâmico por TTC.
+         */
+        fun isWithinTimeToCollisionAlert(
+            distanceMeters: Double,
+            currentSpeedKmh: Float,
+            baseAlertTime: Int = PreferencesManager.DEFAULT_BASE_ALERT_TIME
+        ): Boolean {
+            val ttc = calculateTimeToCollision(distanceMeters, currentSpeedKmh)
+            val limit = calculateDynamicAlertLimit(currentSpeedKmh, baseAlertTime)
+            return ttc <= limit
+        }
+
+        /**
+         * Fase 11: Determina se o alerta deve ser agressivo (Vermelho Piscando):
+         * timeToCollision <= aggressiveAlertTime E currentSpeedKmh > radar.speedLimit.
+         */
+        fun isAggressiveTtcAlert(
+            distanceMeters: Double,
+            currentSpeedKmh: Float,
+            radarSpeedLimit: Int,
+            aggressiveAlertTime: Int = PreferencesManager.DEFAULT_AGGRESSIVE_ALERT_TIME
+        ): Boolean {
+            val ttc = calculateTimeToCollision(distanceMeters, currentSpeedKmh)
+            return ttc <= aggressiveAlertTime.toDouble() && currentSpeedKmh > radarSpeedLimit
         }
 
         /**
@@ -837,9 +891,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             val currentBearing = lastValidBearing ?: _currentLocation.value?.let { loc ->
                 if (loc.hasBearing() && loc.bearing != 0.0f) loc.bearing else null
             } ?: 0.0f
-            preferencesManager.banApproach(radarId, currentBearing)
-            Toast.makeText(this@RadarOverlayService, "Radar banido neste sentido", Toast.LENGTH_SHORT).show()
-            Log.i(TAG, "Radar $radarId banido no vetor direcional ${currentBearing.toInt()}° via banCurrentRadar(global = false). Janela flutuante apagada instantaneamente.")
+            val normBearing = ((currentBearing.roundToInt() % 360) + 360) % 360
+            preferencesManager.banApproach(radarId, normBearing.toDouble())
+            Toast.makeText(this@RadarOverlayService, "Radar banido no vetor ~${normBearing}º", Toast.LENGTH_SHORT).show()
+            Log.i(TAG, "Radar $radarId banido no vetor direcional $normBearing° via banCurrentRadar(global = false). Janela flutuante apagada instantaneamente.")
         }
 
         _nearbyRadars.value = _nearbyRadars.value.filter { it.radar.id != radarId }
@@ -858,9 +913,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             val currentBearing = bearing ?: lastValidBearing ?: _currentLocation.value?.let { loc ->
                 if (loc.hasBearing() && loc.bearing != 0.0f) loc.bearing else null
             } ?: 0.0f
-            preferencesManager.banApproach(radarId, currentBearing)
-            Toast.makeText(this@RadarOverlayService, "Radar banido neste sentido", Toast.LENGTH_SHORT).show()
-            Log.i(TAG, "Radar $radarId banido no vetor direcional ${currentBearing.toInt()}°.")
+            val normBearing = ((currentBearing.roundToInt() % 360) + 360) % 360
+            preferencesManager.banApproach(radarId, normBearing.toDouble())
+            Toast.makeText(this@RadarOverlayService, "Radar banido no vetor ~${normBearing}º", Toast.LENGTH_SHORT).show()
+            Log.i(TAG, "Radar $radarId banido no vetor direcional $normBearing°.")
         }
 
         val updatedNearby = _nearbyRadars.value.filter { it.radar.id != radarId }
@@ -927,6 +983,12 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                         banCurrentRadar(global = true)
                     }
 
+                    val baseAlertTime = if (::preferencesManager.isInitialized) preferencesManager.baseAlertTime else PreferencesManager.DEFAULT_BASE_ALERT_TIME
+                    val aggressiveAlertTime = if (::preferencesManager.isInitialized) preferencesManager.aggressiveAlertTime else PreferencesManager.DEFAULT_AGGRESSIVE_ALERT_TIME
+
+                    // Fase 11: Se timeToCollision <= aggressive_alert_time E currentSpeedKmh > radar.speedLimit -> Alerta Agressivo
+                    val isAggressive = isOverSpeed && (nearby.timeToCollisionSec <= aggressiveAlertTime.toDouble() || nearby.isAggressiveAlert)
+
                     if (!isOverSpeed) {
                         // 1. Estado Verde/Neutro (Seguro): Se currentSpeed <= radar.speedLimit.
                         // Card normal (tamanho padrão), cor verde ou cinza escuro.
@@ -937,27 +999,13 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                             radarType = radar.type,
                             isDarkMode = isDarkMode,
                             source = radar.source,
+                            directionDeg = radar.bearing,
                             onBlacklistClick = onBanClick,
                             onBlacklistLongClick = onBanLongClick
                         )
-                    } else if (nearby.distanceMeters > (alertDistance / 2f)) {
-                        // 2. Estado Vermelho Estático (Atenção - Alerta Inicial):
-                        // Se currentSpeed > radar.speedLimit E currentDistance > (alertDistance / 2).
-                        // O card tem o mesmo tamanho compacto do estado verde, mas com o fundo Vermelho Sólido
-                        // (sem piscar nem alterar escala). Texto: "Acima do Limite".
-                        WarningStaticRadarOverlay(
-                            distanceMeters = distance,
-                            speedLimit = speedLimit,
-                            currentSpeed = speedState.toInt(),
-                            radarType = radar.type,
-                            isDarkMode = isDarkMode,
-                            source = radar.source,
-                            onBlacklistClick = onBanClick,
-                            onBlacklistLongClick = onBanLongClick
-                        )
-                    } else {
+                    } else if (isAggressive) {
                         // 3. Estado Vermelho Agressivo (Perigo Iminente - Frenagem):
-                        // Se currentSpeed > radar.speedLimit E currentDistance <= (alertDistance / 2).
+                        // Se currentSpeed > radar.speedLimit E timeToCollision <= aggressive_alert_time.
                         // O layout muda para expansivo, ocupando mais espaço. O fundo pisca agressivamente
                         // (via InfiniteTransition de cor/opacidade) com o texto chamativo pedindo para reduzir.
                         AggressiveRadarOverlay(
@@ -967,6 +1015,23 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                             radarType = radar.type,
                             isDarkMode = isDarkMode,
                             source = radar.source,
+                            directionDeg = radar.bearing,
+                            onBlacklistClick = onBanClick,
+                            onBlacklistLongClick = onBanLongClick
+                        )
+                    } else {
+                        // 2. Estado Vermelho Estático (Atenção - Alerta Inicial):
+                        // Se currentSpeed > radar.speedLimit porém timeToCollision > aggressive_alert_time.
+                        // O card tem o mesmo tamanho compacto do estado verde, mas com o fundo Vermelho Sólido
+                        // (sem piscar nem alterar escala). Texto: "Acima do Limite".
+                        WarningStaticRadarOverlay(
+                            distanceMeters = distance,
+                            speedLimit = speedLimit,
+                            currentSpeed = speedState.toInt(),
+                            radarType = radar.type,
+                            isDarkMode = isDarkMode,
+                            source = radar.source,
+                            directionDeg = radar.bearing,
                             onBlacklistClick = onBanClick,
                             onBlacklistLongClick = onBanLongClick
                         )
@@ -977,8 +1042,60 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     }
 
     /**
+     * Fase 12: Exibe a fonte da base e a seta direcional cadastrada no banco de dados.
+     * Se directionDeg for nulo, exibe "• 360°" para indicar radar radial.
+     * Se directionDeg existir, aplica Modifier.rotate(directionDeg.toFloat()) na seta (Norte = 0°).
+     */
+    @Composable
+    private fun RadarDirectionAndSourceBadge(
+        source: String?,
+        directionDeg: Double?,
+        textColor: Color = Color.White.copy(alpha = 0.6f)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = "Fonte: ${source ?: "Desconhecida"}",
+                fontSize = 10.sp,
+                color = textColor,
+                fontWeight = FontWeight.Normal
+            )
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            if (directionDeg != null) {
+                val roundedDeg = ((directionDeg.roundToInt() % 360) + 360) % 360
+                Icon(
+                    imageVector = Icons.Default.North,
+                    contentDescription = "Sentido $roundedDeg°",
+                    modifier = Modifier
+                        .size(11.dp)
+                        .rotate(roundedDeg.toFloat()),
+                    tint = textColor
+                )
+                Spacer(modifier = Modifier.width(2.dp))
+                Text(
+                    text = "$roundedDeg°",
+                    fontSize = 10.sp,
+                    color = textColor,
+                    fontWeight = FontWeight.SemiBold
+                )
+            } else {
+                Text(
+                    text = "• 360°",
+                    fontSize = 10.sp,
+                    color = textColor,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+
+    /**
      * Estado Vermelho Estático (Atenção - Alerta Inicial):
-     * Usado quando currentSpeed > radar.speedLimit E currentDistance > (alertDistance / 2).
+     * Usado quando currentSpeed > radar.speedLimit E timeToCollision > aggressive_alert_time.
      * Possui exatamente o mesmo tamanho compacto do NormalRadarOverlay, porém com fundo Vermelho Sólido
      * estático (sem piscar nem animar escala) e o texto "Acima do Limite".
      */
@@ -991,6 +1108,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         radarType: String,
         isDarkMode: Boolean,
         source: String? = null,
+        directionDeg: Double? = null,
         onBlacklistClick: () -> Unit,
         onBlacklistLongClick: (() -> Unit)? = null
     ) {
@@ -1056,12 +1174,11 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
                     Spacer(modifier = Modifier.height(3.dp))
 
-                    // Transparência de Fonte (Fase 9)
-                    Text(
-                        text = "Fonte: ${source ?: "Desconhecida"}",
-                        fontSize = 10.sp,
-                        color = Color.White.copy(alpha = 0.6f),
-                        fontWeight = FontWeight.Normal
+                    // Transparência de Fonte (Fase 9) e Setas Direcionais (Fase 12)
+                    RadarDirectionAndSourceBadge(
+                        source = source,
+                        directionDeg = directionDeg,
+                        textColor = Color.White.copy(alpha = 0.65f)
                     )
                 }
 
@@ -1157,6 +1274,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         radarType: String,
         isDarkMode: Boolean,
         source: String? = null,
+        directionDeg: Double? = null,
         onBlacklistClick: () -> Unit,
         onBlacklistLongClick: (() -> Unit)? = null
     ) {
@@ -1225,12 +1343,11 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
                     Spacer(modifier = Modifier.height(2.dp))
 
-                    // Transparência de Fonte (Fase 9)
-                    Text(
-                        text = "Fonte: ${source ?: "Desconhecida"}",
-                        fontSize = 10.sp,
-                        color = Color.White.copy(alpha = 0.55f),
-                        fontWeight = FontWeight.Normal
+                    // Transparência de Fonte (Fase 9) e Setas Direcionais (Fase 12)
+                    RadarDirectionAndSourceBadge(
+                        source = source,
+                        directionDeg = directionDeg,
+                        textColor = Color.White.copy(alpha = 0.55f)
                     )
                 }
 
@@ -1295,6 +1412,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         radarType: String,
         isDarkMode: Boolean,
         source: String? = null,
+        directionDeg: Double? = null,
         onBlacklistClick: () -> Unit,
         onBlacklistLongClick: (() -> Unit)? = null
     ) {
@@ -1397,12 +1515,11 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Transparência de Fonte (Fase 9)
-                    Text(
-                        text = "Fonte: ${source ?: "Desconhecida"}",
-                        fontSize = 10.sp,
-                        color = Color.White.copy(alpha = 0.6f),
-                        fontWeight = FontWeight.Normal
+                    // Transparência de Fonte (Fase 9) e Setas Direcionais (Fase 12)
+                    RadarDirectionAndSourceBadge(
+                        source = source,
+                        directionDeg = directionDeg,
+                        textColor = Color.White.copy(alpha = 0.6f)
                     )
                 }
 
@@ -1742,11 +1859,9 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         }
         val effectiveVehicleBearing = lastValidBearing
 
-        // Fase 8: Lê as 4 distâncias customizadas do PreferencesManager
-        val distLowSpeed = preferencesManager.distLowSpeed
-        val distCity = preferencesManager.distCity
-        val distExpress = preferencesManager.distExpress
-        val distHighway = preferencesManager.distHighway
+        // Fase 11: Configurações mestre de tempo TTC (Tempo de Colisão)
+        val baseAlertTime = preferencesManager.baseAlertTime
+        val aggressiveAlertTime = preferencesManager.aggressiveAlertTime
 
         // Fase 9 e 9.2: Filtro Anti-Falsos Positivos (OSM e Blacklist Vetorial Direcional)
         val blockOsm = preferencesManager.blockOsmRadars
@@ -1755,6 +1870,14 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
         _currentLocation.value = location
         _currentSpeedKmh.value = speedKmh
+
+        // Fase 11: Matemática Dinâmica (TTC)
+        // Se o carro estiver a menos de 10 km/h, assume 10 km/h para evitar divisão por zero ou avisos infinitos
+        val effectiveSpeedKmh = if (speedKmh < 10f) 10f else speedKmh
+        val speedMs = effectiveSpeedKmh / 3.6f
+
+        // Curva de tempo variável: mais segundos na rodovia, menos na cidade
+        val dynamicAlertLimit = calculateDynamicAlertLimit(speedKmh, baseAlertTime)
 
         // Caching Espacial em RAM (Anti-Superaquecimento): itera apenas sobre cachedRadars
         val candidates = getOrUpdateCachedRadars(location)
@@ -1778,17 +1901,11 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
             val distanceMeters = location.distanceTo(radarLocation)
 
-            // Define o alertDistance avaliando a propriedade radar.speedLimit (Fase 8)
-            val alertDistance = getAlertDistanceForRadar(
-                speedLimit = radar.speedLimit,
-                distLowSpeed = distLowSpeed,
-                distCity = distCity,
-                distExpress = distExpress,
-                distHighway = distHighway
-            )
+            // Fase 11: timeToCollision = distanceMeters / speedMs
+            val timeToCollision = distanceMeters / speedMs
 
-            // Filtro de proximidade inicial flexível conforme Fase 8
-            if (distanceMeters <= alertDistance) {
+            // Regra de Disparo TTC: timeToCollision <= dynamicAlertLimit
+            if (timeToCollision <= dynamicAlertLimit) {
                 // 1. Verificação de Ângulo Relativo: Cone de Visão Frontal (170 graus à frente)
                 // Descarta imediatamente se angleDiff >= 85 (radar ultrapassado ou nas costas do carro)
                 val isFront = isInFrontOfVehicle(location, radarLocation, effectiveVehicleBearing)
@@ -1802,11 +1919,14 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                     )
 
                     if (inDirection) {
+                        val isAggressive = (timeToCollision <= aggressiveAlertTime.toDouble()) && (speedKmh > radar.speedLimit)
                         matchingRadars.add(
                             NearbyRadar(
                                 radar = radar,
                                 distanceMeters = distanceMeters,
-                                alertDistanceMeters = alertDistance
+                                alertDistanceMeters = (dynamicAlertLimit * speedMs).toFloat(),
+                                timeToCollisionSec = timeToCollision.toDouble(),
+                                isAggressiveAlert = isAggressive
                             )
                         )
 
@@ -1823,7 +1943,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                                 radarAlertCooldowns[radar.id] = now
                                 if (preferencesManager.isSoundEnabled) {
                                     shouldTriggerSound = true
-                                    Log.d(TAG, "ALERTA SONORO: Radar ID ${radar.id} (${radar.speedLimit} km/h) a ${distanceMeters.toInt()}m. Vel: ${speedKmh.toInt()} km/h")
+                                    Log.d(TAG, "ALERTA SONORO: Radar ID ${radar.id} (${radar.speedLimit} km/h) a ${distanceMeters.toInt()}m (TTC: ${timeToCollision.toInt()}s). Vel: ${speedKmh.toInt()} km/h")
                                 }
                             }
                         }
@@ -1836,7 +1956,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         _nearbyRadars.value = sortedAlerts
         val closest = sortedAlerts.firstOrNull()
         _closestRadar.value = closest
-        _closestRadarAlertDistance.value = closest?.alertDistanceMeters ?: distHighway.toFloat()
+        _closestRadarAlertDistance.value = closest?.alertDistanceMeters ?: (dynamicAlertLimit * speedMs).toFloat()
 
         if (shouldTriggerSound) {
             playBeep()
@@ -1857,20 +1977,26 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     suspend fun checkProximityWithDistance(
         location: Location,
         customSpeedKmh: Float? = null,
+        customBaseAlertTime: Int? = null,
+        customAggressiveAlertTime: Int? = null,
+        customBlockOsm: Boolean? = null,
+        customBlacklistedIds: Set<String>? = null,
         customDistLowSpeed: Int? = null,
         customDistCity: Int? = null,
         customDistExpress: Int? = null,
-        customDistHighway: Int? = null,
-        customBlockOsm: Boolean? = null,
-        customBlacklistedIds: Set<String>? = null
+        customDistHighway: Int? = null
     ): List<NearbyRadar> = withContext(Dispatchers.IO) {
-        val distLowSpeed = customDistLowSpeed ?: if (::preferencesManager.isInitialized) preferencesManager.distLowSpeed else PreferencesManager.DEFAULT_DIST_LOW_SPEED
-        val distCity = customDistCity ?: if (::preferencesManager.isInitialized) preferencesManager.distCity else PreferencesManager.DEFAULT_DIST_CITY
-        val distExpress = customDistExpress ?: if (::preferencesManager.isInitialized) preferencesManager.distExpress else PreferencesManager.DEFAULT_DIST_EXPRESS
-        val distHighway = customDistHighway ?: if (::preferencesManager.isInitialized) preferencesManager.distHighway else PreferencesManager.DEFAULT_DIST_HIGHWAY
+        val speedKmh = customSpeedKmh ?: if (location.hasSpeed()) location.speed * 3.6f else 0f
+        val baseAlertTime = customBaseAlertTime ?: if (::preferencesManager.isInitialized) preferencesManager.baseAlertTime else PreferencesManager.DEFAULT_BASE_ALERT_TIME
+        val aggressiveAlertTime = customAggressiveAlertTime ?: if (::preferencesManager.isInitialized) preferencesManager.aggressiveAlertTime else PreferencesManager.DEFAULT_AGGRESSIVE_ALERT_TIME
 
         val blockOsm = customBlockOsm ?: if (::preferencesManager.isInitialized) preferencesManager.blockOsmRadars else true
         val bannedApproaches = customBlacklistedIds ?: if (::preferencesManager.isInitialized) preferencesManager.bannedApproaches else emptySet()
+
+        // Fase 11: A Matemática Dinâmica (TTC)
+        val effectiveSpeedKmh = if (speedKmh < 10f) 10f else speedKmh
+        val speedMs = effectiveSpeedKmh / 3.6f
+        val dynamicAlertLimit = calculateDynamicAlertLimit(speedKmh, baseAlertTime)
 
         // Caching Espacial em RAM (Anti-Superaquecimento): itera apenas sobre cachedRadars
         val candidates = getOrUpdateCachedRadars(location)
@@ -1894,16 +2020,9 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             radarLocation.longitude = radar.longitude
 
             val distanceMeters = location.distanceTo(radarLocation)
+            val timeToCollision = distanceMeters / speedMs
 
-            val alertDistance = getAlertDistanceForRadar(
-                speedLimit = radar.speedLimit,
-                distLowSpeed = distLowSpeed,
-                distCity = distCity,
-                distExpress = distExpress,
-                distHighway = distHighway
-            )
-
-            if (distanceMeters <= alertDistance) {
+            if (timeToCollision <= dynamicAlertLimit) {
                 // 1. Verificação de Ângulo Relativo: Cone de Visão Frontal (170 graus)
                 val isFront = isInFrontOfVehicle(location, radarLocation, effectiveVehicleBearing)
 
@@ -1916,11 +2035,14 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                     )
 
                     if (matchesDirection) {
+                        val isAggressive = (timeToCollision <= aggressiveAlertTime.toDouble()) && (speedKmh > radar.speedLimit)
                         matchingRadars.add(
                             NearbyRadar(
                                 radar = radar,
                                 distanceMeters = distanceMeters,
-                                alertDistanceMeters = alertDistance
+                                alertDistanceMeters = (dynamicAlertLimit * speedMs).toFloat(),
+                                timeToCollisionSec = timeToCollision.toDouble(),
+                                isAggressiveAlert = isAggressive
                             )
                         )
                     }

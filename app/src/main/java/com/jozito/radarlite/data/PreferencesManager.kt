@@ -110,33 +110,53 @@ class PreferencesManager(context: Context) {
         set(value) = prefs.edit().putInt(KEY_LAST_SYNC_COUNT, value).apply()
 
     /**
-     * Distância de alerta para vias de baixa velocidade (radares até 40 km/h).
-     * Valor padrão: 180 metros.
+     * Tempo base de aviso prévio (em segundos) antes de alcançar o radar (Fase 11 - TTC).
+     * Valor padrão: 15 segundos.
      */
+    var baseAlertTime: Int
+        get() = prefs.getInt(KEY_BASE_ALERT_TIME, DEFAULT_BASE_ALERT_TIME)
+        set(value) = prefs.edit().putInt(KEY_BASE_ALERT_TIME, value).apply()
+
+    /**
+     * Tempo para disparo de alerta agressivo (em segundos) em caso de excesso de velocidade (Fase 11 - TTC).
+     * Valor padrão: 7 segundos.
+     */
+    var aggressiveAlertTime: Int
+        get() = prefs.getInt(KEY_AGGRESSIVE_ALERT_TIME, DEFAULT_AGGRESSIVE_ALERT_TIME)
+        set(value) = prefs.edit().putInt(KEY_AGGRESSIVE_ALERT_TIME, value).apply()
+
+    /**
+     * Distância de alerta para vias de baixa velocidade (radares até 40 km/h).
+     * @deprecated Substituído pela fórmula dinâmica TTC (base_alert_time / aggressive_alert_time).
+     */
+    @Deprecated("Substituído pela fórmula dinâmica TTC")
     var distLowSpeed: Int
         get() = prefs.getInt(KEY_DIST_LOW_SPEED, DEFAULT_DIST_LOW_SPEED)
         set(value) = prefs.edit().putInt(KEY_DIST_LOW_SPEED, value).apply()
 
     /**
      * Distância de alerta para vias urbanas (radares de 41 a 60 km/h).
-     * Valor padrão: 220 metros.
+     * @deprecated Substituído pela fórmula dinâmica TTC (base_alert_time / aggressive_alert_time).
      */
+    @Deprecated("Substituído pela fórmula dinâmica TTC")
     var distCity: Int
         get() = prefs.getInt(KEY_DIST_CITY, DEFAULT_DIST_CITY)
         set(value) = prefs.edit().putInt(KEY_DIST_CITY, value).apply()
 
     /**
      * Distância de alerta para vias expressas (radares de 61 a 90 km/h).
-     * Valor padrão: 350 metros.
+     * @deprecated Substituído pela fórmula dinâmica TTC (base_alert_time / aggressive_alert_time).
      */
+    @Deprecated("Substituído pela fórmula dinâmica TTC")
     var distExpress: Int
         get() = prefs.getInt(KEY_DIST_EXPRESS, DEFAULT_DIST_EXPRESS)
         set(value) = prefs.edit().putInt(KEY_DIST_EXPRESS, value).apply()
 
     /**
      * Distância de alerta para rodovias (radares acima de 90 km/h).
-     * Valor padrão: 500 metros.
+     * @deprecated Substituído pela fórmula dinâmica TTC (base_alert_time / aggressive_alert_time).
      */
+    @Deprecated("Substituído pela fórmula dinâmica TTC")
     var distHighway: Int
         get() = prefs.getInt(KEY_DIST_HIGHWAY, DEFAULT_DIST_HIGHWAY)
         set(value) = prefs.edit().putInt(KEY_DIST_HIGHWAY, value).apply()
@@ -335,7 +355,13 @@ class PreferencesManager(context: Context) {
         const val KEY_LAST_SYNC_TIMESTAMP = "last_sync_timestamp"
         const val KEY_LAST_SYNC_COUNT = "last_sync_count"
 
-        // Fase 8: Distâncias customizáveis por limite de velocidade da via
+        // Fase 11: Fórmula de Alerta por Tempo de Colisão (TTC) Variável
+        const val KEY_BASE_ALERT_TIME = "base_alert_time"
+        const val KEY_AGGRESSIVE_ALERT_TIME = "aggressive_alert_time"
+        const val DEFAULT_BASE_ALERT_TIME = 15 // segundos
+        const val DEFAULT_AGGRESSIVE_ALERT_TIME = 7 // segundos
+
+        // Fase 8: Distâncias customizáveis (legado mantido para migração limpa)
         const val KEY_DIST_LOW_SPEED = "dist_low_speed"
         const val KEY_DIST_CITY = "dist_city"
         const val KEY_DIST_EXPRESS = "dist_express"

@@ -61,25 +61,30 @@ Você pode baixar diretamente o instalador compilado da versão 1.0:
     - **Broadcast de Estado (Pong / Eventos):** O RadarLite emite a action `"com.jozito412.radarlite.ACTION_STATE_CHANGED"` com o extra booleano `"is_running"` (`true`/`false`) sempre que o serviço é iniciado, encerrado (inclusive via Bluetooth/Ignição) ou quando solicitado pelo Launcher.
   - Possui trava lógica de concorrência (`startLock`) que evita inicializações duplicadas caso o serviço já esteja em execução.
 
-### 4. 🛡️ Curadoria Manual & Blacklist Híbrida (Fases 9, 9.1, 9.2 & 9.3)
-- **Blacklist Híbrida com Gestos Inteligentes (Fase 9.3):**
-  - **👆 Toque Rápido (Sentido Atual):** Bane apenas o vetor direcional atual de aproximação (`${radarId}_${bearing}`). Aplica um cone de bloqueio de 60º no sentido em que o carro está se deslocando. Ideal para radares que multam apenas a pista oposta ou vias paralelas. Toast: *"Radar banido neste sentido"*.
+### 4. 🛡️ Curadoria Manual, Blacklist Híbrida & Backup em TXT (Fases 9, 9.3, 12 & 13)
+- **Blacklist Híbrida com Gestos Inteligentes (Fase 9.3 & 12):**
+  - **👆 Toque Rápido (Sentido Atual):** Bane apenas o vetor direcional atual de aproximação (`${radarId}_${bearing}`). Aplica um cone de bloqueio de 60º no sentido em que o carro está se deslocando. Ideal para radares que multam apenas a pista oposta ou vias paralelas. Toast informativo com o grau exato: *"Radar banido no vetor ~185º"*.
   - **⏳ Toque Longo / Long Press (Todas as Direções):** Dispara uma resposta háptica (vibração sutil) e bane o radar globalmente (`${radarId}_GLOBAL`). Aplica a marreta global, ignorando o radar de qualquer ângulo de aproximação. Ideal para postes ou lombadas eletrônicas fisicamente desinstalados. Toast: *"Radar banido em TODAS as direções"*.
+- **Setas Direcionais no Card de Alerta (Fase 12):**
+  - Exibe a fonte da base e um indicador direcional ao vivo na UI:
+    - Se o radar possuir direção cadastrada (`direction_deg`), exibe uma seta rotacionada nos graus exatos do banco (Norte = 0º, Leste = 90º, etc.).
+    - Se o radar não tiver direção, exibe `• 360°` indicando radar radial omnidirecional.
+- **Exportação e Backup da Blacklist em TXT (Fase 13):**
+  - Botão **Exportar Blacklist** na tela principal para gerar um arquivo `radarlite_blacklist.txt` compartilhado via Android Intent Chooser (WhatsApp, Bluetooth, Drive, Email, etc.), permitindo migrar a lista de bloqueios facilmente entre telas e centrais multimídia.
 - **Botão Gigante de 72dp:**
   - Botão ergonômico com área de toque de `72.dp` e ícone bem visível para curadoria segura em movimento.
-- **Transparência de Fonte:**
-  - Exibe a origem do radar diretamente no card (ex: `OSM`, `DNIT`, `ANTT`).
 - **Gerenciador de Radares Ignorados na Tela Principal:**
   - Painel para consultar todos os radares banidos com indicação clara de bloqueio por sentido ou global, restauração individual ou limpeza completa da blacklist com um toque.
-- **Filtro Global de Falsos Positivos:**
-  - Opção para ignorar em massa radares cadastrados pelo OpenStreetMap caso o usuário prefira apenas bases homologadas.
 
-### 5. 📏 Distâncias Customizáveis por Faixa de Velocidade
-Ajuste fino individualizado para disparar o aviso na distância ideal para a sua velocidade de condução:
-- 🔵 **Vias Lentas (até 40 km/h):** Padrão 180m
-- 🟢 **Vias Urbanas (41 a 60 km/h):** Padrão 220m
-- 🟡 **Vias Expressas (61 a 90 km/h):** Padrão 350m
-- 🔴 **Rodovias (acima de 90 km/h):** Padrão 500m
+### 5. ⏱️ Fórmula de Alerta por "Tempo de Colisão (TTC) Variável" (Fase 11)
+Substituição dos antigos sliders de distância fixa por uma fórmula dinâmica baseada no tempo real que o condutor levará para alcançar o radar:
+- **Cálculo Dinâmico:** Converte a velocidade do veículo para m/s (`effectiveSpeed = max(speed, 10 km/h)`) e calcula `timeToCollision = distanceMeters / speedMs`.
+- **Curva de Tempo Variável:**
+  - 🏙️ **Velocidades Baixas (≤ 60 km/h):** Limite de **9.0 segundos** (evita alertas desnecessariamente longos na cidade).
+  - 🚗 **Vias Expressas (61 a 90 km/h):** Limite de **12.0 segundos**.
+  - 🛣️ **Rodovias (> 90 km/h):** Limite de **15.0 segundos** (garante frenagem suave e segura em alta velocidade).
+- **Alerta Agressivo por TTC:** O alerta passa para Vermelho Piscando se `timeToCollision <= aggressive_alert_time` (padrão 7s) **E** a velocidade atual estiver acima do limite do radar.
+- **Configurações Mestre:** Sliders intuitivos para ajuste do **Tempo Base de Aviso** (8s a 30s) e **Tempo de Alerta Agressivo** (3s a 15s).
 
 ### 6. 🔄 Atualização Segura (Safe Swap)
 - Sincronização direta com a base consolidada dos estados **PR, SC, SP e MS**.

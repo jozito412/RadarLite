@@ -2,6 +2,7 @@ package com.jozito.radarlite
 
 import com.jozito.radarlite.data.RadarEntity
 import com.jozito.radarlite.service.RadarOverlayService
+import kotlin.math.roundToInt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -556,6 +557,88 @@ class RadarOverlayServiceTest {
     fun testTwoWaySyncStateBroadcastConstants() {
         assertEquals("com.jozito412.radarlite.ACTION_STATE_CHANGED", RadarOverlayService.ACTION_STATE_CHANGED)
         assertEquals("is_running", RadarOverlayService.EXTRA_IS_RUNNING)
+    }
+
+    @Test
+    fun testFase11TimeToCollisionCalculation() {
+        // 1. A menos de 10 km/h (ex: 5 km/h ou parado 0 km/h), deve assumir 10 km/h (10 / 3.6 = ~2.777 m/s)
+        val ttcZeroSpeed = RadarOverlayService.calculateTimeToCollision(distanceMeters = 100.0, currentSpeedKmh = 0f)
+        val expectedAt10Kmh = 100.0 / (10.0 / 3.6)
+        assertEquals(expectedAt10Kmh, ttcZeroSpeed, 0.01)
+
+        val ttc5Kmh = RadarOverlayService.calculateTimeToCollision(distanceMeters = 100.0, currentSpeedKmh = 5f)
+        assertEquals(expectedAt10Kmh, ttc5Kmh, 0.01)
+
+        // 2. A 36 km/h (10 m/s): distância de 100m -> tempo de colisão = 10.0s
+        val ttc36Kmh = RadarOverlayService.calculateTimeToCollision(distanceMeters = 100.0, currentSpeedKmh = 36f)
+        assertEquals(10.0, ttc36Kmh, 0.01)
+
+        // 3. A 72 km/h (20 m/s): distância de 200m -> tempo de colisão = 10.0s
+        val ttc72Kmh = RadarOverlayService.calculateTimeToCollision(distanceMeters = 200.0, currentSpeedKmh = 72f)
+        assertEquals(10.0, ttc72Kmh, 0.01)
+
+        // 4. A 108 km/h (30 m/s): distância de 300m -> tempo de colisão = 10.0s
+        val ttc108Kmh = RadarOverlayService.calculateTimeToCollision(distanceMeters = 300.0, currentSpeedKmh = 108f)
+        assertEquals(10.0, ttc108Kmh, 0.01)
+    }
+
+    @Test
+    fun testFase11DynamicAlertLimitAndTriggerRule() {
+        // Curva de Tempo Variável com baseAlertTime padrão (15s):
+        // speed > 90 km/h -> 15.0s
+        // speed > 60 km/h -> 12.0s
+        // speed <= 60 km/h -> 9.0s
+        assertEquals(15.0, RadarOverlayService.calculateDynamicAlertLimit(100f, 15), 0.001)
+        assertEquals(15.0, RadarOverlayService.calculateDynamicAlertLimit(91f, 15), 0.001)
+        assertEquals(12.0, RadarOverlayService.calculateDynamicAlertLimit(80f, 15), 0.001)
+        assertEquals(12.0, RadarOverlayService.calculateDynamicAlertLimit(61f, 15), 0.001)
+        assertEquals(9.0, RadarOverlayService.calculateDynamicAlertLimit(60f, 15), 0.001)
+        assertEquals(9.0, RadarOverlayService.calculateDynamicAlertLimit(40f, 15), 0.001)
+        assertEquals(9.0, RadarOverlayService.calculateDynamicAlertLimit(10f, 15), 0.001)
+
+        // Disparo de Alerta TTC:
+        // Exemplo: Rodovia a 108 km/h (30 m/s), dynamicLimit = 15.0s -> distância máxima de alerta = 450m
+        // A 400m: TTC = 13.33s <= 15s -> DEVE DISPARAR
+        assertTrue(RadarOverlayService.isWithinTimeToCollisionAlert(distanceMeters = 400.0, currentSpeedKmh = 108f, baseAlertTime = 15))
+        // A 500m: TTC = 16.66s > 15s -> NÃO DISPARA
+        assertFalse(RadarOverlayService.isWithinTimeToCollisionAlert(distanceMeters = 500.0, currentSpeedKmh = 108f, baseAlertTime = 15))
+
+        // Exemplo: Cidade a 36 km/h (10 m/s), dynamicLimit = 9.0s -> distância máxima de alerta = 90m
+        // A 80m: TTC = 8.0s <= 9.0s -> DEVE DISPARAR
+        assertTrue(RadarOverlayService.isWithinTimeToCollisionAlert(distanceMeters = 80.0, currentSpeedKmh = 36f, baseAlertTime = 15))
+        // A 120m: TTC = 12.0s > 9.0s -> NÃO DISPARA (evita alarmes longos em baixa velocidade)
+        assertFalse(RadarOverlayService.isWithinTimeToCollisionAlert(distanceMeters = 120.0, currentSpeedKmh = 36f, baseAlertTime = 15))
+    }
+
+    @Test
+    fun testFase11AggressiveAlertRule() {
+        val radarSpeedLimit = 60
+        val aggressiveAlertTime = 7 // 7s
+
+        // Caso 1: Velocidade do carro (50 km/h) <= radarSpeedLimit (60 km/h) -> NUNCA agressivo mesmo com TTC curto
+        assertFalse(RadarOverlayService.isAggressiveTtcAlert(distanceMeters = 30.0, currentSpeedKmh = 50f, radarSpeedLimit = radarSpeedLimit, aggressiveAlertTime = aggressiveAlertTime))
+
+        // Caso 2: Velocidade do carro (80 km/h > 60 km/h) E TTC > 7s -> Atenção (Aviso estático, não agressivo)
+        // 80 km/h = ~22.22 m/s. Distância de 200m -> TTC = 9.0s > 7s
+        assertFalse(RadarOverlayService.isAggressiveTtcAlert(distanceMeters = 200.0, currentSpeedKmh = 80f, radarSpeedLimit = radarSpeedLimit, aggressiveAlertTime = aggressiveAlertTime))
+
+        // Caso 3: Velocidade do carro (80 km/h > 60 km/h) E TTC <= 7s -> ALERTA AGRESSIVO (Vermelho piscando / frenagem)
+        // Distância de 120m -> TTC = 5.4s <= 7s
+        assertTrue(RadarOverlayService.isAggressiveTtcAlert(distanceMeters = 120.0, currentSpeedKmh = 80f, radarSpeedLimit = radarSpeedLimit, aggressiveAlertTime = aggressiveAlertTime))
+    }
+
+    @Test
+    fun testFase12DirectionalHeadingAndBearingFormat() {
+        // Normalização de graus para rotação de bússola
+        fun normalizeDegrees(deg: Double): Int = (((deg.roundToInt() % 360) + 360) % 360)
+
+        assertEquals(0, normalizeDegrees(0.0))
+        assertEquals(90, normalizeDegrees(90.0))
+        assertEquals(180, normalizeDegrees(180.0))
+        assertEquals(270, normalizeDegrees(270.0))
+        assertEquals(0, normalizeDegrees(360.0))
+        assertEquals(185, normalizeDegrees(185.2))
+        assertEquals(355, normalizeDegrees(-5.0))
     }
 }
 

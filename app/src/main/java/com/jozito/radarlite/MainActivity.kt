@@ -92,9 +92,11 @@ import com.jozito.radarlite.ui.theme.RadarLiteTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.core.content.FileProvider
 
 class MainActivity : ComponentActivity() {
 
@@ -145,11 +147,9 @@ fun RadarLiteApp() {
     var lastSyncTimestamp by remember { mutableStateOf(prefs.lastSyncTimestamp) }
     var lastSyncCount by remember { mutableIntStateOf(prefs.lastSyncCount) }
 
-    // Fase 8: Distâncias customizáveis por limite de velocidade da via
-    var distLowSpeed by remember { mutableIntStateOf(prefs.distLowSpeed) }
-    var distCity by remember { mutableIntStateOf(prefs.distCity) }
-    var distExpress by remember { mutableIntStateOf(prefs.distExpress) }
-    var distHighway by remember { mutableIntStateOf(prefs.distHighway) }
+    // Fase 11: Tempo de Colisão (TTC) configurável
+    var baseAlertTime by remember { mutableIntStateOf(prefs.baseAlertTime) }
+    var aggressiveAlertTime by remember { mutableIntStateOf(prefs.aggressiveAlertTime) }
 
     // Fase 9: Filtro Anti-Falsos Positivos (OSM e Blacklist)
     var blockOsmRadars by remember { mutableStateOf(prefs.blockOsmRadars) }
@@ -938,16 +938,61 @@ fun RadarLiteApp() {
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        OutlinedButton(
-                            onClick = { showBlacklistDialog = true },
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                text = "Gerenciar Radares Ignorados",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            OutlinedButton(
+                                onClick = { showBlacklistDialog = true },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text(
+                                    text = "Gerenciar",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+
+                            Button(
+                                onClick = {
+                                    val currentBanned = prefs.bannedApproaches
+                                    if (currentBanned.isEmpty()) {
+                                        Toast.makeText(context, "A Blacklist está vazia", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        try {
+                                            val content = currentBanned.joinToString("\n")
+                                            val file = File(context.cacheDir, "radarlite_blacklist.txt")
+                                            file.writeText(content)
+                                            val uri = FileProvider.getUriForFile(
+                                                context,
+                                                "${context.packageName}.fileprovider",
+                                                file
+                                            )
+                                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                                type = "text/plain"
+                                                putExtra(Intent.EXTRA_STREAM, uri)
+                                                putExtra(Intent.EXTRA_SUBJECT, "RadarLite - Backup da Blacklist")
+                                                putExtra(Intent.EXTRA_TEXT, content)
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            val chooser = Intent.createChooser(sendIntent, "Exportar Blacklist")
+                                            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            context.startActivity(chooser)
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Erro ao exportar: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text(
+                                    text = "Exportar Blacklist",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
                 }
@@ -955,7 +1000,7 @@ fun RadarLiteApp() {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // CONFIGURAÇÃO DE DISTÂNCIAS DE ALERTA (Fase 8)
+            // CONFIGURAÇÃO DE ALERTA POR TEMPO DE COLISÃO (TTC) (Fase 11)
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -978,18 +1023,18 @@ fun RadarLiteApp() {
                             modifier = Modifier.size(40.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Text(text = "📏", fontSize = 20.sp)
+                                Text(text = "⏱️", fontSize = 20.sp)
                             }
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "Distâncias de Alerta por Via",
+                                text = "Tempo de Alerta Dinâmico (TTC)",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp
                             )
                             Text(
-                                text = "Ajuste a antecedência do aviso para evitar frenagens bruscas",
+                                text = "Antecedência em segundos baseada na velocidade real do veículo",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                             )
@@ -998,32 +1043,32 @@ fun RadarLiteApp() {
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // 1. Zonas de 40 km/h (dist_low_speed)
+                    // 1. Tempo Base de Alerta (base_alert_time - Padrão: 15s)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Zonas de 40 km/h: ${distLowSpeed}m",
+                            text = "Tempo Base de Aviso: ${baseAlertTime}s",
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 14.sp
                         )
                         Text(
-                            text = "Até 40 km/h",
+                            text = "Padrão: 15s",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold
                         )
                     }
                     Slider(
-                        value = distLowSpeed.toFloat(),
+                        value = baseAlertTime.toFloat(),
                         onValueChange = { newVal ->
-                            val snapped = ((newVal / 10f).roundToInt() * 10).coerceIn(80, 400)
-                            distLowSpeed = snapped
-                            prefs.distLowSpeed = snapped
+                            val snapped = newVal.roundToInt().coerceIn(8, 30)
+                            baseAlertTime = snapped
+                            prefs.baseAlertTime = snapped
                         },
-                        valueRange = 80f..400f,
+                        valueRange = 8f..30f,
                         colors = SliderDefaults.colors(
                             thumbColor = MaterialTheme.colorScheme.primary,
                             activeTrackColor = MaterialTheme.colorScheme.primary
@@ -1032,116 +1077,48 @@ fun RadarLiteApp() {
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // 2. Vias Urbanas (dist_city: 41 a 60 km/h)
+                    // 2. Tempo para Alerta Agressivo / Frenagem (aggressive_alert_time - Padrão: 7s)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Zonas de 41 a 60 km/h: ${distCity}m",
+                            text = "Alerta Agressivo / Frenagem: ${aggressiveAlertTime}s",
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 14.sp
                         )
                         Text(
-                            text = "41 a 60 km/h",
+                            text = "Padrão: 7s",
                             fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.error,
                             fontWeight = FontWeight.Bold
                         )
                     }
                     Slider(
-                        value = distCity.toFloat(),
+                        value = aggressiveAlertTime.toFloat(),
                         onValueChange = { newVal ->
-                            val snapped = ((newVal / 10f).roundToInt() * 10).coerceIn(100, 500)
-                            distCity = snapped
-                            prefs.distCity = snapped
+                            val snapped = newVal.roundToInt().coerceIn(3, 15)
+                            aggressiveAlertTime = snapped
+                            prefs.aggressiveAlertTime = snapped
                         },
-                        valueRange = 100f..500f,
+                        valueRange = 3f..15f,
                         colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary,
-                            activeTrackColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // 3. Vias Expressas (dist_express: 61 a 90 km/h)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Vias Expressas: ${distExpress}m",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp
-                        )
-                        Text(
-                            text = "61 a 90 km/h",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    Slider(
-                        value = distExpress.toFloat(),
-                        onValueChange = { newVal ->
-                            val snapped = ((newVal / 10f).roundToInt() * 10).coerceIn(150, 700)
-                            distExpress = snapped
-                            prefs.distExpress = snapped
-                        },
-                        valueRange = 150f..700f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary,
-                            activeTrackColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // 4. Rodovias (dist_highway: acima de 90 km/h)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Rodovias: ${distHighway}m",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp
-                        )
-                        Text(
-                            text = "Acima de 90 km/h",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    Slider(
-                        value = distHighway.toFloat(),
-                        onValueChange = { newVal ->
-                            val snapped = ((newVal / 10f).roundToInt() * 10).coerceIn(200, 1000)
-                            distHighway = snapped
-                            prefs.distHighway = snapped
-                        },
-                        valueRange = 200f..1000f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary,
-                            activeTrackColor = MaterialTheme.colorScheme.primary
+                            thumbColor = MaterialTheme.colorScheme.error,
+                            activeTrackColor = MaterialTheme.colorScheme.error
                         )
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Informação visual sobre o alerta em 2 etapas e botão de redefinir padrões
+                    // Informação visual sobre a Curva Dinâmica TTC e botão de redefinir padrões
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Alerta estático nos primeiros 50% da distância e agressivo/piscante nos últimos 50%.",
+                            text = "Curva adaptativa inteligente: ${((baseAlertTime * 0.6).roundToInt())}s na cidade (≤60 km/h), ${((baseAlertTime * 0.8).roundToInt())}s em via expressa (61-90 km/h) e ${baseAlertTime}s em rodovia (>90 km/h).",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             modifier = Modifier.weight(1f).padding(end = 8.dp)
@@ -1149,14 +1126,10 @@ fun RadarLiteApp() {
 
                         TextButton(
                             onClick = {
-                                distLowSpeed = PreferencesManager.DEFAULT_DIST_LOW_SPEED
-                                distCity = PreferencesManager.DEFAULT_DIST_CITY
-                                distExpress = PreferencesManager.DEFAULT_DIST_EXPRESS
-                                distHighway = PreferencesManager.DEFAULT_DIST_HIGHWAY
-                                prefs.distLowSpeed = distLowSpeed
-                                prefs.distCity = distCity
-                                prefs.distExpress = distExpress
-                                prefs.distHighway = distHighway
+                                baseAlertTime = PreferencesManager.DEFAULT_BASE_ALERT_TIME
+                                aggressiveAlertTime = PreferencesManager.DEFAULT_AGGRESSIVE_ALERT_TIME
+                                prefs.baseAlertTime = baseAlertTime
+                                prefs.aggressiveAlertTime = aggressiveAlertTime
                             }
                         ) {
                             Text("Padrão", fontSize = 12.sp)
