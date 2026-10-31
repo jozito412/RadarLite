@@ -120,6 +120,7 @@ fun RadarLiteApp() {
     val radarDao: RadarDao = remember { RadarDatabase.getDatabase(context).radarDao() }
     val coroutineScope = rememberCoroutineScope()
     var showBlacklistDialog by remember { mutableStateOf(false) }
+    var showAboutDialog by remember { mutableStateOf(false) }
 
     // Estados de sincronização com o GitHub (Safe Swap)
     var isSyncing by remember { mutableStateOf(false) }
@@ -1326,6 +1327,61 @@ fun RadarLiteApp() {
                     }
                 )
             }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Seção Sobre o RadarLite & Versão
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showAboutDialog = true },
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(text = "ℹ️", fontSize = 20.sp)
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column {
+                            Text(
+                                text = "RadarLite",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Versão ${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Text(
+                        text = "Sobre e Novidades ❯",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 
@@ -1523,6 +1579,215 @@ fun RadarLiteApp() {
                 blacklistedCount = prefs.blacklistedRadarIds.size
             }
         )
+    }
+
+    // Diálogo Sobre o Aplicativo & Histórico de Versões (Changelog)
+    if (showAboutDialog) {
+        AlertDialog(
+            onDismissRequest = { showAboutDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "🛡️", fontSize = 24.sp)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Sobre o RadarLite",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                        Text(
+                            text = "Versão ${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
+            text = {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 450.dp)
+                ) {
+                    item {
+                        Text(
+                            text = "RadarLite é um copiloto veicular inteligente de alerta de radares em tempo real, projetado para centrais multimídia Android e smartphones com baixo consumo de memória e bateria.",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 18.sp
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Link do Repositório GitHub
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val intent = Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("https://github.com/jozito412/RadarLite")
+                                    )
+                                    context.startActivity(intent)
+                                },
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = "🌐", fontSize = 16.sp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "Código Aberto no GitHub",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "github.com/jozito412/RadarLite",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Histórico de Versões (Changelog)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    // Versão 1.2.0
+                    item {
+                        ChangelogVersionCard(
+                            version = "v1.2.0",
+                            buildNumber = "Build 2",
+                            isLatest = true,
+                            date = "Outubro 2026",
+                            items = listOf(
+                                "⚡ Alerta por Tempo de Colisão (TTC): Alertas calculados em segundos dinâmicos (15s rodovia, 12s expressa, 9s cidade) substituindo distâncias fixas.",
+                                "🧭 Setas Direcionais no HUD: Indicação visual do azimute exato do radar (com rotação em tempo real) e identificação de radares 360° radiais.",
+                                "🔄 Inteligência em Curvas e Afastamento: Filtro de afastamento automático (remove alertas se o carro virou de rua), cone frontal adaptativo e produto escalar vetorial.",
+                                "📁 Exportação de Blacklist em TXT: Compartilhamento da lista de radares ignorados/banidos para migração entre aparelhos via FileProvider.",
+                                "ℹ️ Painel Sobre e Changelog: Histórico de versões e notas de lançamento integrado nativamente no app."
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    // Versão 1.1.0
+                    item {
+                        ChangelogVersionCard(
+                            version = "v1.1.0",
+                            buildNumber = "Build 1.1",
+                            isLatest = false,
+                            date = "Outubro 2026",
+                            items = listOf(
+                                "🚗 Autostart Multimídia e Resiliência Deep Sleep: Detecção de ignição/ACC (ACTION_POWER_CONNECTED) e intenção do usuário.",
+                                "📻 Sincronização via Rádio com CoolantHUD: Broadcasts bidirecionais de controle e heartbeat.",
+                                "🚫 Blacklist Híbrida Direcional: Banimento por ID ou por sentido de circulação (vetor de aproximação ~35°).",
+                                "🧠 Deduplicação em RAM: Filtragem de radares OSM sobrepostos a dados oficiais de governos."
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    // Versão 1.0.0
+                    item {
+                        ChangelogVersionCard(
+                            version = "v1.0.0",
+                            buildNumber = "Build 1",
+                            isLatest = false,
+                            date = "Outubro 2026",
+                            items = listOf(
+                                "🎉 Lançamento Inicial: Overlay flutuante com suporte a modo HUD (espelhado no para-brisa) e modo noturno.",
+                                "📍 Radar SQLite/Room com base offline dos estados PR, SC, SP e MS.",
+                                "🔊 Alertas sonoros sintetizados e beeps de aproximação em alta velocidade.",
+                                "🔄 Atualização Over-The-Air com Safe Swap atômico protegendo contra corrupção."
+                            )
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAboutDialog = false }) {
+                    Text("Fechar", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+}
+
+/**
+ * Cartão de Versão no Histórico de Versões (Changelog).
+ */
+@Composable
+private fun ChangelogVersionCard(
+    version: String,
+    buildNumber: String,
+    isLatest: Boolean,
+    date: String,
+    items: List<String>
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = if (isLatest) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        border = if (isLatest) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else null
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "$version ($buildNumber)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = if (isLatest) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                    )
+                    if (isLatest) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        ) {
+                            Text(
+                                text = "ATUAL",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = date,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            items.forEach { item ->
+                Text(
+                    text = item,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 2.dp),
+                    lineHeight = 16.sp
+                )
+            }
+        }
     }
 }
 
