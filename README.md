@@ -2,13 +2,13 @@
   <img src="./RadarLite_icon.png" width="128" height="128" alt="RadarLite Icon" />
 </p>
 
-# 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.0)
+# 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.2.0)
 
 [![Android](https://img.shields.io/badge/Android-8.0%2B%20(API%2026%2B)-3DDC84?logo=android&logoColor=white)](#)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-7F52FF?logo=kotlin&logoColor=white)](#)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white)](#)
 [![Room](https://img.shields.io/badge/Room-SQLite%20Offline-FF6F00)](#)
-[![Versão](https://img.shields.io/badge/Versão-1.0-brightgreen)](#)
+[![Versão](https://img.shields.io/badge/Versão-1.2.0-brightgreen)](#)
 
 **RadarLite** é um aplicativo Android veicular de alta performance, leve, 100% offline e com interface moderna em **Jetpack Compose**. Projetado especificamente para motoristas e centrais multimídia automotivas, ele funciona como uma camada flutuante inteligente (*overlay*) sobre o Waze, Google Maps ou qualquer outro app de navegação.
 
@@ -16,7 +16,7 @@
 
 ## 📦 Download do Instalador
 
-Você pode baixar diretamente o instalador compilado da versão 1.0:
+Você pode baixar diretamente o instalador compilado da versão mais recente (**v1.2.0 - Build 2**):
 - 📲 **[RadarLite.apk](./RadarLite.apk)** (Instalador oficial pronto para Android)
 
 ---
@@ -94,6 +94,11 @@ Substituição dos antigos sliders de distância fixa por uma fórmula dinâmica
 - Sincronização direta com a base consolidada dos estados **PR, SC, SP e MS**.
 - **Safe Swap:** O download e a conversão dos dados são validados em banco temporário. Se houver falha de rede ou dados corrompidos, a base anterior continua 100% funcional sem interrupções.
 
+### 7. ℹ️ Painel Sobre & Histórico de Versões (Changelog Nativo)
+- Seção **"Sobre o RadarLite"** integrada no rodapé da tela principal.
+- Exibição dinâmica da versão instalada e número de compilação via `BuildConfig`.
+- Diálogo interativo com detalhes técnicos, links do projeto e histórico completo de notas de versão (*Changelog*).
+
 ---
 
 ## 🛠️ Permissões Necessárias
@@ -136,6 +141,29 @@ cd RadarLite
 - **Serviços:** Android Lifecycle Service & WindowManager Overlay
 - **Geolocalização:** Google Play Services Location API
 - **Concorrência:** Kotlin Coroutines & StateFlow
+
+---
+
+## 📜 Histórico de Versões (Changelog)
+
+### [v1.2.0 (Build 2)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.0) — *Outubro 2026*
+- ⚡ **Alerta por Tempo de Colisão (TTC Dinâmico):** Substituição de distâncias fixas por tempo real de aproximação adaptativo (15s rodovia, 12s via expressa, 9s cidade).
+- 🧭 **Setas Direcionais no Card de Alerta:** Indicação com rotação em graus reais (`direction_deg`) e identificação de radares 360° radiais.
+- 🔄 **Inteligência em Curvas & Afastamento:** Filtro de Range Rate ($D_{\text{atual}} > D_{\text{anterior}} + 3\text{m}$), cone adaptativo (55°/60°/85°) e produto escalar vetorial.
+- 📁 **Exportação da Blacklist em TXT:** Backup e compartilhamento de radares banidos via Android Intent Chooser / FileProvider.
+- ℹ️ **Painel Sobre & Changelog:** Histórico de lançamentos e versão nativamente incorporados no aplicativo.
+
+### v1.1.0 — *Outubro 2026*
+- 🚗 **Autostart Multimídia e Resiliência Deep Sleep:** Inicialização com gatilhos de ignição/ACC (`ACTION_POWER_CONNECTED`) e controle de intenção do usuário (`is_service_intentionally_stopped`).
+- 📻 **Sincronização via Rádio com CoolantHUD / Launchers:** Broadcasts bidirecionais de controle remoto e pulso de vida Watchdog.
+- 🚫 **Blacklist Híbrida Direcional:** Bloqueio inteligente por sentido de circulação (~35°) ou marreta global.
+- 🧠 **Deduplicação Espacial em RAM:** Eliminação de sobreposição de bases governamentais e comunitárias.
+
+### [v1.0 (Build 1)](https://github.com/jozito412/RadarLite/releases/tag/v1.0) — *Outubro 2026*
+- 🎉 **Lançamento Inicial:** Overlay flutuante com suporte a modo HUD (espelhado no para-brisa) e modo noturno.
+- 📍 **Base Offline Room/SQLite:** Dados integrados dos estados PR, SC, SP e MS.
+- 🔊 **Alertas Sonoros:** Beeps sintetizados progressivos de velocidade crítica.
+- 🔄 **Atualização Segura (Safe Swap):** Sincronização atômica contra arquivos corrompidos.
 
 ---
 
