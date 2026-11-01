@@ -27,6 +27,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -56,6 +57,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.North
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.ui.draw.rotate
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -396,6 +398,23 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                 !hasDirection -> 55.0f
                 currentSpeedKmh <= 60.0f -> 60.0f
                 else -> 85.0f
+            }
+        }
+
+        /**
+         * Converte um ângulo em graus (0° a 360°) no ponto cardeal/colateral correspondente (N, NE, L, SE, S, SO, O, NO).
+         */
+        fun getCardinalDirection(deg: Double): String {
+            val normalized = ((deg % 360.0) + 360.0) % 360.0
+            return when {
+                normalized >= 337.5 || normalized < 22.5 -> "N"
+                normalized < 67.5 -> "NE"
+                normalized < 112.5 -> "L"
+                normalized < 157.5 -> "SE"
+                normalized < 202.5 -> "S"
+                normalized < 247.5 -> "SO"
+                normalized < 292.5 -> "O"
+                else -> "NO"
             }
         }
 
@@ -1099,55 +1118,19 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     }
 
     /**
-     * Fase 12: Exibe a fonte da base e a seta direcional cadastrada no banco de dados.
-     * Se directionDeg for nulo, exibe "• 360°" para indicar radar radial.
-     * Se directionDeg existir, aplica Modifier.rotate(directionDeg.toFloat()) na seta (Norte = 0°).
+     * Exibe a fonte cadastrada da base de dados (DNIT, PRF, DER, OSM, etc.).
      */
     @Composable
-    private fun RadarDirectionAndSourceBadge(
+    private fun RadarSourceBadge(
         source: String?,
-        directionDeg: Double?,
         textColor: Color = Color.White.copy(alpha = 0.6f)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = "Fonte: ${source ?: "Desconhecida"}",
-                fontSize = 10.sp,
-                color = textColor,
-                fontWeight = FontWeight.Normal
-            )
-
-            Spacer(modifier = Modifier.width(6.dp))
-
-            if (directionDeg != null) {
-                val roundedDeg = ((directionDeg.roundToInt() % 360) + 360) % 360
-                Icon(
-                    imageVector = Icons.Default.North,
-                    contentDescription = "Sentido $roundedDeg°",
-                    modifier = Modifier
-                        .size(11.dp)
-                        .rotate(roundedDeg.toFloat()),
-                    tint = textColor
-                )
-                Spacer(modifier = Modifier.width(2.dp))
-                Text(
-                    text = "$roundedDeg°",
-                    fontSize = 10.sp,
-                    color = textColor,
-                    fontWeight = FontWeight.SemiBold
-                )
-            } else {
-                Text(
-                    text = "• 360°",
-                    fontSize = 10.sp,
-                    color = textColor,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
+        Text(
+            text = "Fonte: ${source ?: "Desconhecida"}",
+            fontSize = 10.sp,
+            color = textColor,
+            fontWeight = FontWeight.Normal
+        )
     }
 
     /**
@@ -1214,12 +1197,22 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                                     fontWeight = FontWeight.Bold
                                 )
                             }
-                            Text(
-                                text = "${distanceMeters}m",
-                                color = Color.White,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${distanceMeters}m",
+                                    color = Color.White,
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                RadarCompassBadge(
+                                    directionDeg = directionDeg,
+                                    isDarkMode = isDarkMode,
+                                    sizeDp = 22
+                                )
+                            }
                             Text(
                                 text = "Atual: $currentSpeed km/h",
                                 color = Color(0xFFFFCDD2),
@@ -1231,10 +1224,9 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
                     Spacer(modifier = Modifier.height(3.dp))
 
-                    // Transparência de Fonte (Fase 9) e Setas Direcionais (Fase 12)
-                    RadarDirectionAndSourceBadge(
+                    // Transparência de Fonte (Fase 9)
+                    RadarSourceBadge(
                         source = source,
-                        directionDeg = directionDeg,
                         textColor = Color.White.copy(alpha = 0.65f)
                     )
                 }
@@ -1383,12 +1375,22 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
-                            Text(
-                                text = "${distanceMeters}m",
-                                color = if (isDarkMode) Color(0xFF00FF66) else Color(0xFF4CAF50),
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${distanceMeters}m",
+                                    color = if (isDarkMode) Color(0xFF00FF66) else Color(0xFF4CAF50),
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                RadarCompassBadge(
+                                    directionDeg = directionDeg,
+                                    isDarkMode = isDarkMode,
+                                    sizeDp = 22
+                                )
+                            }
                             Text(
                                 text = "Atual: $currentSpeed km/h",
                                 color = Color(0xFFB0BEC5),
@@ -1400,10 +1402,9 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
                     Spacer(modifier = Modifier.height(2.dp))
 
-                    // Transparência de Fonte (Fase 9) e Setas Direcionais (Fase 12)
-                    RadarDirectionAndSourceBadge(
+                    // Transparência de Fonte (Fase 9)
+                    RadarSourceBadge(
                         source = source,
-                        directionDeg = directionDeg,
                         textColor = Color.White.copy(alpha = 0.55f)
                     )
                 }
@@ -1561,21 +1562,30 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                                 fontSize = 26.sp,
                                 fontWeight = FontWeight.ExtraBold
                             )
-                            Text(
-                                text = "Radar a ${distanceMeters}m",
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Radar a ${distanceMeters}m",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                RadarCompassBadge(
+                                    directionDeg = directionDeg,
+                                    isDarkMode = isDarkMode,
+                                    sizeDp = 22
+                                )
+                            }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Transparência de Fonte (Fase 9) e Setas Direcionais (Fase 12)
-                    RadarDirectionAndSourceBadge(
+                    // Transparência de Fonte (Fase 9)
+                    RadarSourceBadge(
                         source = source,
-                        directionDeg = directionDeg,
                         textColor = Color.White.copy(alpha = 0.6f)
                     )
                 }
@@ -2201,6 +2211,112 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
+        }
+    }
+}
+
+/**
+ * Bússola animada e indicador visual de direção do radar.
+ * Exibido em destaque junto à distância do radar para facilitar a auditoria
+ * e limpeza da base de dados pelo condutor em tempo real.
+ *
+ * - Se directionDeg != null: Anima suavemente uma agulha/seta de navegação apontando
+ *   para o azimute do radar com disco de bússola estilizado, graus e ponto cardeal (ex: 90° L).
+ * - Se directionDeg == null: Exibe badge indicativo de radar omnidirecional (360° Radial).
+ */
+@Composable
+fun RadarCompassBadge(
+    directionDeg: Double?,
+    isDarkMode: Boolean = false,
+    sizeDp: Int = 22
+) {
+    if (directionDeg != null) {
+        val roundedDeg = ((directionDeg.roundToInt() % 360) + 360) % 360
+        val cardinal = RadarOverlayService.getCardinalDirection(directionDeg)
+
+        // Rotação animada suave da agulha da bússola
+        val animatedRotation by animateFloatAsState(
+            targetValue = roundedDeg.toFloat(),
+            animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+            label = "RadarCompassRotation"
+        )
+
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = if (isDarkMode) Color(0xFF1E2620) else Color.Black.copy(alpha = 0.38f),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                if (isDarkMode) Color(0xFF00FF66).copy(alpha = 0.45f) else Color.White.copy(alpha = 0.28f)
+            )
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                // Disco circular da bússola com agulha animada
+                Box(
+                    modifier = Modifier
+                        .size(sizeDp.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isDarkMode) Color(0xFF00FF66).copy(alpha = 0.15f)
+                            else Color.White.copy(alpha = 0.18f)
+                        )
+                        .border(
+                            1.dp,
+                            if (isDarkMode) Color(0xFF00FF66).copy(alpha = 0.4f) else Color.White.copy(alpha = 0.35f),
+                            CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Navigation,
+                        contentDescription = "Sentido $roundedDeg° $cardinal",
+                        modifier = Modifier
+                            .size((sizeDp * 0.65).dp)
+                            .rotate(animatedRotation),
+                        tint = if (isDarkMode) Color(0xFF00FF66) else Color(0xFFFFD54F) // Amarelo bússola ou verde neon
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(5.dp))
+
+                Text(
+                    text = "$roundedDeg° $cardinal",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDarkMode) Color(0xFF00FF66) else Color.White
+                )
+            }
+        }
+    } else {
+        // Radar 360° Omnidirecional (Radial)
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = if (isDarkMode) Color(0xFF2A1E0B) else Color(0xFFE65100).copy(alpha = 0.32f),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                Color(0xFFFF9800).copy(alpha = 0.55f)
+            )
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = "🌐",
+                    fontSize = 12.sp
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "360° Radial",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFFFB74D)
+                )
+            }
         }
     }
 }

@@ -694,5 +694,20 @@ class RadarOverlayServiceTest {
         assertEquals(-1.0, dot180, 0.01)
         assertFalse(RadarOverlayService.isMovingTowardsRadar(vehicleBearing = 180f, bearingToRadar = 0f))
     }
+
+    @Test
+    fun testCardinalDirectionCalculation() {
+        // Teste de pontos cardeais e colaterais
+        assertEquals("N", RadarOverlayService.getCardinalDirection(0.0))
+        assertEquals("N", RadarOverlayService.getCardinalDirection(359.0))
+        assertEquals("N", RadarOverlayService.getCardinalDirection(10.0))
+        assertEquals("NE", RadarOverlayService.getCardinalDirection(45.0))
+        assertEquals("L", RadarOverlayService.getCardinalDirection(90.0))
+        assertEquals("SE", RadarOverlayService.getCardinalDirection(135.0))
+        assertEquals("S", RadarOverlayService.getCardinalDirection(180.0))
+        assertEquals("SO", RadarOverlayService.getCardinalDirection(225.0))
+        assertEquals("O", RadarOverlayService.getCardinalDirection(270.0))
+        assertEquals("NO", RadarOverlayService.getCardinalDirection(315.0))
+    }
 }
 

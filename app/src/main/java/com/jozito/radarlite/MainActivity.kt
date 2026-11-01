@@ -88,6 +88,7 @@ import com.jozito.radarlite.data.RadarDatabase
 import com.jozito.radarlite.data.RadarEntity
 import com.jozito.radarlite.data.RadarSyncManager
 import com.jozito.radarlite.service.RadarOverlayService
+import com.jozito.radarlite.service.RadarCompassBadge
 import com.jozito.radarlite.ui.theme.RadarLiteTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -414,12 +415,20 @@ fun RadarLiteApp() {
                         ) {
                             Column {
                                 val (typeIcon, typeLabel) = RadarOverlayService.getRadarTypeInfo(nearby.radar.type)
-                                Text(
-                                    text = "Radar a ${nearby.distanceMeters.toInt()}m",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
-                                    color = MaterialTheme.colorScheme.onErrorContainer
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "Radar a ${nearby.distanceMeters.toInt()}m",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    RadarCompassBadge(
+                                        directionDeg = nearby.radar.bearing,
+                                        isDarkMode = false,
+                                        sizeDp = 22
+                                    )
+                                }
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "$typeIcon $typeLabel",
@@ -951,7 +960,7 @@ fun RadarLiteApp() {
                                 Text(
                                     text = "Gerenciar",
                                     fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.SemiBold,
                                 )
                             }
 
@@ -991,7 +1000,7 @@ fun RadarLiteApp() {
                                 Text(
                                     text = "Exportar Blacklist",
                                     fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.SemiBold,
                                 )
                             }
                         }
