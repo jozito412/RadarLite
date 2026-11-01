@@ -69,10 +69,10 @@ Você pode baixar diretamente o instalador compilado da versão mais recente (**
 - **Blacklist Híbrida com Gestos Inteligentes (Fase 9.3 & 12):**
   - **👆 Toque Rápido (Sentido Atual):** Bane apenas o vetor direcional atual de aproximação (`${radarId}_${bearing}`). Aplica um cone de bloqueio de 60º no sentido em que o carro está se deslocando. Ideal para radares que multam apenas a pista oposta ou vias paralelas. Toast informativo com o grau exato: *"Radar banido no vetor ~185º"*.
   - **⏳ Toque Longo / Long Press (Todas as Direções):** Dispara uma resposta háptica (vibração sutil) e bane o radar globalmente (`${radarId}_GLOBAL`). Aplica a marreta global, ignorando o radar de qualquer ângulo de aproximação. Ideal para postes ou lombadas eletrônicas fisicamente desinstalados. Toast: *"Radar banido em TODAS as direções"*.
-- **Setas Direcionais no Card de Alerta (Fase 12):**
-  - Exibe a fonte da base e um indicador direcional ao vivo na UI:
-    - Se o radar possuir direção cadastrada (`direction_deg`), exibe uma seta rotacionada nos graus exatos do banco (Norte = 0º, Leste = 90º, etc.).
-    - Se o radar não tiver direção, exibe `• 360°` indicando radar radial omnidirecional.
+- **Seta Direcional Dinâmica para o Radar (Target Pointer):**
+  - Seta animada junto à distância (`150m` `[ ⬆️ Na sua via ]` ou `[ ➡️ Transversal Dir. ]`) apontando fisicamente para a localização do radar em relação à trajetória frontal do veículo (para-brisa).
+  - Permite ao condutor distinguir instantaneamente se o radar à frente está na sua própria via ou em uma rua transversal (mesmo quando a base de dados não possui direção cadastrada).
+  - Azimute numérico cadastrado e fonte de dados mantidos de forma limpa no rodapé do card.
 - **Exportação e Backup da Blacklist em TXT (Fase 13):**
   - Botão **Exportar Blacklist** na tela principal para gerar um arquivo `radarlite_blacklist.txt` compartilhado via Android Intent Chooser (WhatsApp, Bluetooth, Drive, Email, etc.), permitindo migrar a lista de bloqueios facilmente entre telas e centrais multimídia.
 - **Botão Gigante de 72dp:**
@@ -148,7 +148,7 @@ cd RadarLite
 
 ### [v1.2.0 (Build 2)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.0) — *Outubro 2026*
 - ⚡ **Alerta por Tempo de Colisão (TTC Dinâmico):** Substituição de distâncias fixas por tempo real de aproximação adaptativo (15s rodovia, 12s via expressa, 9s cidade).
-- 🧭 **Setas Direcionais no Card de Alerta:** Indicação com rotação em graus reais (`direction_deg`) e identificação de radares 360° radiais.
+- 🧭 **Seta Direcional Dinâmica (Target Pointer):** Aponta diretamente para a posição física do radar em relação à via do carro (`Na sua via`, `Transversal Dir.`, `Transversal Esq.`), eliminando confusão em ruas perpendiculares.
 - 🔄 **Inteligência em Curvas & Afastamento:** Filtro de Range Rate ($D_{\text{atual}} > D_{\text{anterior}} + 3\text{m}$), cone adaptativo (55°/60°/85°) e produto escalar vetorial.
 - 📁 **Exportação da Blacklist em TXT:** Backup e compartilhamento de radares banidos via Android Intent Chooser / FileProvider.
 - ℹ️ **Painel Sobre & Changelog:** Histórico de lançamentos e versão nativamente incorporados no aplicativo.

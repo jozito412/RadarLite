@@ -709,5 +709,47 @@ class RadarOverlayServiceTest {
         assertEquals("O", RadarOverlayService.getCardinalDirection(270.0))
         assertEquals("NO", RadarOverlayService.getCardinalDirection(315.0))
     }
+
+    @Test
+    fun testRelativeBearingCalculation() {
+        // 1. Radar exatamente à frente do carro (qualquer direção geográfica)
+        assertEquals(0f, RadarOverlayService.calculateRelativeBearing(0f, 0f), 0.01f)
+        assertEquals(0f, RadarOverlayService.calculateRelativeBearing(90f, 90f), 0.01f)
+        assertEquals(0f, RadarOverlayService.calculateRelativeBearing(180f, 180f), 0.01f)
+        assertEquals(0f, RadarOverlayService.calculateRelativeBearing(270f, 270f), 0.01f)
+
+        // 2. Radar em rua transversal à direita (+90°)
+        assertEquals(90f, RadarOverlayService.calculateRelativeBearing(0f, 90f), 0.01f)
+        assertEquals(90f, RadarOverlayService.calculateRelativeBearing(90f, 180f), 0.01f)
+        assertEquals(90f, RadarOverlayService.calculateRelativeBearing(270f, 0f), 0.01f)
+
+        // 3. Radar em rua transversal à esquerda (-90°)
+        assertEquals(-90f, RadarOverlayService.calculateRelativeBearing(0f, 270f), 0.01f)
+        assertEquals(-90f, RadarOverlayService.calculateRelativeBearing(90f, 0f), 0.01f)
+        assertEquals(-90f, RadarOverlayService.calculateRelativeBearing(180f, 90f), 0.01f)
+
+        // 4. Radar atrás (+/- 180°)
+        assertEquals(180f, kotlin.math.abs(RadarOverlayService.calculateRelativeBearing(0f, 180f)), 0.01f)
+    }
+
+    @Test
+    fun testRelativePositionLabels() {
+        // "Na sua via": abs <= 15°
+        assertEquals("Na sua via", RadarOverlayService.getRelativePositionLabel(0f))
+        assertEquals("Na sua via", RadarOverlayService.getRelativePositionLabel(10f))
+        assertEquals("Na sua via", RadarOverlayService.getRelativePositionLabel(-12f))
+
+        // "Frente Dir." / "Frente Esq.": 15° < abs <= 60°
+        assertEquals("Frente Dir.", RadarOverlayService.getRelativePositionLabel(35f))
+        assertEquals("Frente Esq.", RadarOverlayService.getRelativePositionLabel(-45f))
+
+        // "Transversal Dir." / "Transversal Esq.": 60° < abs <= 120°
+        assertEquals("Transversal Dir.", RadarOverlayService.getRelativePositionLabel(90f))
+        assertEquals("Transversal Esq.", RadarOverlayService.getRelativePositionLabel(-85f))
+
+        // "Atrás": abs > 120°
+        assertEquals("Atrás", RadarOverlayService.getRelativePositionLabel(160f))
+        assertEquals("Atrás", RadarOverlayService.getRelativePositionLabel(-150f))
+    }
 }
 

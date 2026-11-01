@@ -88,7 +88,7 @@ import com.jozito.radarlite.data.RadarDatabase
 import com.jozito.radarlite.data.RadarEntity
 import com.jozito.radarlite.data.RadarSyncManager
 import com.jozito.radarlite.service.RadarOverlayService
-import com.jozito.radarlite.service.RadarCompassBadge
+import com.jozito.radarlite.service.RadarTargetPointerBadge
 import com.jozito.radarlite.ui.theme.RadarLiteTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -423,8 +423,8 @@ fun RadarLiteApp() {
                                         color = MaterialTheme.colorScheme.onErrorContainer
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    RadarCompassBadge(
-                                        directionDeg = nearby.radar.bearing,
+                                    RadarTargetPointerBadge(
+                                        relativeAngleDeg = nearby.relativeAngleDeg,
                                         isDarkMode = false,
                                         sizeDp = 22
                                     )

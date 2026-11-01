@@ -130,7 +130,8 @@ data class NearbyRadar(
     val distanceMeters: Float,
     val alertDistanceMeters: Float = 500f,
     val timeToCollisionSec: Double = 0.0,
-    val isAggressiveAlert: Boolean = false
+    val isAggressiveAlert: Boolean = false,
+    val relativeAngleDeg: Float = 0f
 )
 
 /**
@@ -415,6 +416,40 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                 normalized < 247.5 -> "SO"
                 normalized < 292.5 -> "O"
                 else -> "NO"
+            }
+        }
+
+        /**
+         * Calcula o ângulo relativo do radar em relação à trajetória frontal do veículo (-180° a +180°):
+         * - 0°: O radar está exatamente à frente do carro (na mesma via).
+         * - +90°: O radar está à direita (ex: rua transversal à direita).
+         * - -90°: O radar está à esquerda (ex: rua transversal à esquerda).
+         * - +/-180°: O radar está atrás do carro.
+         */
+        fun calculateRelativeBearing(vehicleBearing: Float?, bearingToRadar: Float): Float {
+            if (vehicleBearing == null) return 0f
+            val normDest = ((bearingToRadar % 360f) + 360f) % 360f
+            val normVehicle = ((vehicleBearing % 360f) + 360f) % 360f
+            var diff = normDest - normVehicle
+            while (diff > 180f) diff -= 360f
+            while (diff < -180f) diff += 360f
+            return diff
+        }
+
+        /**
+         * Retorna a descrição posicional intuitiva do radar em relação à trajetória frontal do veículo:
+         * - "Na sua via": abs <= 15° (à frente, mesma rua)
+         * - "Frente Dir." / "Frente Esq.": 15° < abs <= 60° (curva ou bifurcação)
+         * - "Transversal Dir." / "Transversal Esq.": 60° < abs <= 120° (rua transversal / cruzamento)
+         * - "Atrás": abs > 120°
+         */
+        fun getRelativePositionLabel(relativeAngleDeg: Float): String {
+            val absAngle = kotlin.math.abs(relativeAngleDeg)
+            return when {
+                absAngle <= 15f -> "Na sua via"
+                absAngle <= 60f -> if (relativeAngleDeg > 0) "Frente Dir." else "Frente Esq."
+                absAngle <= 120f -> if (relativeAngleDeg > 0) "Transversal Dir." else "Transversal Esq."
+                else -> "Atrás"
             }
         }
 
@@ -1076,6 +1111,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                             isDarkMode = isDarkMode,
                             source = radar.source,
                             directionDeg = radar.bearing,
+                            relativeAngleDeg = nearby.relativeAngleDeg,
                             onBlacklistClick = onBanClick,
                             onBlacklistLongClick = onBanLongClick
                         )
@@ -1092,6 +1128,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                             isDarkMode = isDarkMode,
                             source = radar.source,
                             directionDeg = radar.bearing,
+                            relativeAngleDeg = nearby.relativeAngleDeg,
                             onBlacklistClick = onBanClick,
                             onBlacklistLongClick = onBanLongClick
                         )
@@ -1108,6 +1145,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                             isDarkMode = isDarkMode,
                             source = radar.source,
                             directionDeg = radar.bearing,
+                            relativeAngleDeg = nearby.relativeAngleDeg,
                             onBlacklistClick = onBanClick,
                             onBlacklistLongClick = onBanLongClick
                         )
@@ -1118,15 +1156,22 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     }
 
     /**
-     * Exibe a fonte cadastrada da base de dados (DNIT, PRF, DER, OSM, etc.).
+     * Exibe a fonte cadastrada da base de dados (DNIT, PRF, DER, OSM, etc.) e o azimute se houver.
      */
     @Composable
     private fun RadarSourceBadge(
         source: String?,
+        directionDeg: Double? = null,
         textColor: Color = Color.White.copy(alpha = 0.6f)
     ) {
+        val directionText = if (directionDeg != null) {
+            val rounded = ((directionDeg.roundToInt() % 360) + 360) % 360
+            " • Azimute ${rounded}°"
+        } else {
+            " • 360°"
+        }
         Text(
-            text = "Fonte: ${source ?: "Desconhecida"}",
+            text = "Fonte: ${source ?: "Desconhecida"}$directionText",
             fontSize = 10.sp,
             color = textColor,
             fontWeight = FontWeight.Normal
@@ -1149,6 +1194,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         isDarkMode: Boolean,
         source: String? = null,
         directionDeg: Double? = null,
+        relativeAngleDeg: Float = 0f,
         onBlacklistClick: () -> Unit,
         onBlacklistLongClick: (() -> Unit)? = null
     ) {
@@ -1207,8 +1253,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                                     fontWeight = FontWeight.Bold
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                RadarCompassBadge(
-                                    directionDeg = directionDeg,
+                                RadarTargetPointerBadge(
+                                    relativeAngleDeg = relativeAngleDeg,
                                     isDarkMode = isDarkMode,
                                     sizeDp = 22
                                 )
@@ -1224,9 +1270,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
                     Spacer(modifier = Modifier.height(3.dp))
 
-                    // Transparência de Fonte (Fase 9)
+                    // Transparência de Fonte (Fase 9) e Azimute Cadastrado
                     RadarSourceBadge(
                         source = source,
+                        directionDeg = directionDeg,
                         textColor = Color.White.copy(alpha = 0.65f)
                     )
                 }
@@ -1324,6 +1371,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         isDarkMode: Boolean,
         source: String? = null,
         directionDeg: Double? = null,
+        relativeAngleDeg: Float = 0f,
         onBlacklistClick: () -> Unit,
         onBlacklistLongClick: (() -> Unit)? = null
     ) {
@@ -1385,8 +1433,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                                     fontWeight = FontWeight.Bold
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                RadarCompassBadge(
-                                    directionDeg = directionDeg,
+                                RadarTargetPointerBadge(
+                                    relativeAngleDeg = relativeAngleDeg,
                                     isDarkMode = isDarkMode,
                                     sizeDp = 22
                                 )
@@ -1402,9 +1450,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
                     Spacer(modifier = Modifier.height(2.dp))
 
-                    // Transparência de Fonte (Fase 9)
+                    // Transparência de Fonte (Fase 9) e Azimute Cadastrado
                     RadarSourceBadge(
                         source = source,
+                        directionDeg = directionDeg,
                         textColor = Color.White.copy(alpha = 0.55f)
                     )
                 }
@@ -1471,6 +1520,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         isDarkMode: Boolean,
         source: String? = null,
         directionDeg: Double? = null,
+        relativeAngleDeg: Float = 0f,
         onBlacklistClick: () -> Unit,
         onBlacklistLongClick: (() -> Unit)? = null
     ) {
@@ -1572,8 +1622,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                RadarCompassBadge(
-                                    directionDeg = directionDeg,
+                                RadarTargetPointerBadge(
+                                    relativeAngleDeg = relativeAngleDeg,
                                     isDarkMode = isDarkMode,
                                     sizeDp = 22
                                 )
@@ -1583,9 +1633,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Transparência de Fonte (Fase 9)
+                    // Transparência de Fonte (Fase 9) e Azimute Cadastrado
                     RadarSourceBadge(
                         source = source,
+                        directionDeg = directionDeg,
                         textColor = Color.White.copy(alpha = 0.6f)
                     )
                 }
@@ -2003,6 +2054,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                             // Registra/atualiza a menor distância no histórico de aproximação
                             radarDistanceHistory[radar.id] = distanceMeters
 
+                            val relativeAngle = calculateRelativeBearing(heading, bearingToRadar)
                             val isAggressive = (timeToCollision <= aggressiveAlertTime.toDouble()) && (speedKmh > radar.speedLimit)
                             matchingRadars.add(
                                 NearbyRadar(
@@ -2010,7 +2062,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                                     distanceMeters = distanceMeters,
                                     alertDistanceMeters = (dynamicAlertLimit * speedMs).toFloat(),
                                     timeToCollisionSec = timeToCollision.toDouble(),
-                                    isAggressiveAlert = isAggressive
+                                    isAggressiveAlert = isAggressive,
+                                    relativeAngleDeg = relativeAngle
                                 )
                             )
 
@@ -2131,6 +2184,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                         val isPositiveProjection = isMovingTowardsRadar(heading, bearingToRadar)
 
                         if (isPositiveProjection) {
+                            val relativeAngle = calculateRelativeBearing(heading, bearingToRadar)
                             val isAggressive = (timeToCollision <= aggressiveAlertTime.toDouble()) && (speedKmh > radar.speedLimit)
                             matchingRadars.add(
                                 NearbyRadar(
@@ -2138,7 +2192,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                                     distanceMeters = distanceMeters,
                                     alertDistanceMeters = (dynamicAlertLimit * speedMs).toFloat(),
                                     timeToCollisionSec = timeToCollision.toDouble(),
-                                    isAggressiveAlert = isAggressive
+                                    isAggressiveAlert = isAggressive,
+                                    relativeAngleDeg = relativeAngle
                                 )
                             )
                         }
@@ -2216,107 +2271,112 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 }
 
 /**
- * Bússola animada e indicador visual de direção do radar.
- * Exibido em destaque junto à distância do radar para facilitar a auditoria
- * e limpeza da base de dados pelo condutor em tempo real.
+ * Seta dinâmica e indicador visual apontando para a localização física do radar
+ * em relação à trajetória frontal do veículo (para-brisa).
  *
- * - Se directionDeg != null: Anima suavemente uma agulha/seta de navegação apontando
- *   para o azimute do radar com disco de bússola estilizado, graus e ponto cardeal (ex: 90° L).
- * - Se directionDeg == null: Exibe badge indicativo de radar omnidirecional (360° Radial).
+ * Permite ao condutor identificar instantaneamente:
+ * - Seta para CIMA (0°): Radar exatamente à frente, na mesma via ("Na sua via").
+ * - Seta para a DIREITA (~90°): Radar em rua transversal à direita ("Transversal Dir.").
+ * - Seta para a ESQUERDA (~-90°): Radar em rua transversal à esquerda ("Transversal Esq.").
  */
 @Composable
-fun RadarCompassBadge(
-    directionDeg: Double?,
+fun RadarTargetPointerBadge(
+    relativeAngleDeg: Float,
     isDarkMode: Boolean = false,
     sizeDp: Int = 22
 ) {
-    if (directionDeg != null) {
-        val roundedDeg = ((directionDeg.roundToInt() % 360) + 360) % 360
-        val cardinal = RadarOverlayService.getCardinalDirection(directionDeg)
+    val positionLabel = RadarOverlayService.getRelativePositionLabel(relativeAngleDeg)
+    val absAngle = kotlin.math.abs(relativeAngleDeg)
+    val isAheadOnSameRoad = absAngle <= 15f
+    val isCrossStreet = absAngle in 15f..120f
 
-        // Rotação animada suave da agulha da bússola
-        val animatedRotation by animateFloatAsState(
-            targetValue = roundedDeg.toFloat(),
-            animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
-            label = "RadarCompassRotation"
-        )
+    // Rotação suave da seta em direção física ao radar
+    val animatedRotation by animateFloatAsState(
+        targetValue = relativeAngleDeg,
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+        label = "RadarTargetPointerRotation"
+    )
 
-        Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = if (isDarkMode) Color(0xFF1E2620) else Color.Black.copy(alpha = 0.38f),
-            border = androidx.compose.foundation.BorderStroke(
-                1.dp,
-                if (isDarkMode) Color(0xFF00FF66).copy(alpha = 0.45f) else Color.White.copy(alpha = 0.28f)
-            )
+    // Cores temáticas calibradas para distinção imediata ao volante:
+    // Verde/Amarelo: na mesma via à frente (alerta relevante)
+    // Laranja: rua transversal à direita ou à esquerda (alerta transversal de esquina)
+    // Cinza: ultrapassado / atrás
+    val badgeBgColor = when {
+        isAheadOnSameRoad -> if (isDarkMode) Color(0xFF1B2E20) else Color(0xFF1B5E20).copy(alpha = 0.38f)
+        isCrossStreet -> if (isDarkMode) Color(0xFF332014) else Color(0xFFE65100).copy(alpha = 0.35f)
+        else -> if (isDarkMode) Color(0xFF1E1E1E) else Color.Black.copy(alpha = 0.38f)
+    }
+
+    val badgeBorderColor = when {
+        isAheadOnSameRoad -> if (isDarkMode) Color(0xFF00FF66).copy(alpha = 0.65f) else Color(0xFF4CAF50).copy(alpha = 0.65f)
+        isCrossStreet -> Color(0xFFFF9800).copy(alpha = 0.7f)
+        else -> Color.White.copy(alpha = 0.25f)
+    }
+
+    val arrowTint = when {
+        isAheadOnSameRoad -> if (isDarkMode) Color(0xFF00FF66) else Color(0xFFFFEB3B)
+        isCrossStreet -> Color(0xFFFFB74D)
+        else -> Color.White.copy(alpha = 0.7f)
+    }
+
+    val textColor = when {
+        isAheadOnSameRoad -> if (isDarkMode) Color(0xFF00FF66) else Color.White
+        isCrossStreet -> Color(0xFFFFCC80)
+        else -> Color.White.copy(alpha = 0.8f)
+    }
+
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = badgeBgColor,
+        border = androidx.compose.foundation.BorderStroke(1.dp, badgeBorderColor)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+            // Disco circular com seta apontando fisicamente para a localização do radar
+            Box(
+                modifier = Modifier
+                    .size(sizeDp.dp)
+                    .clip(CircleShape)
+                    .background(arrowTint.copy(alpha = 0.15f))
+                    .border(1.dp, arrowTint.copy(alpha = 0.45f), CircleShape),
+                contentAlignment = Alignment.Center
             ) {
-                // Disco circular da bússola com agulha animada
-                Box(
+                Icon(
+                    imageVector = Icons.Default.Navigation,
+                    contentDescription = positionLabel,
                     modifier = Modifier
-                        .size(sizeDp.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (isDarkMode) Color(0xFF00FF66).copy(alpha = 0.15f)
-                            else Color.White.copy(alpha = 0.18f)
-                        )
-                        .border(
-                            1.dp,
-                            if (isDarkMode) Color(0xFF00FF66).copy(alpha = 0.4f) else Color.White.copy(alpha = 0.35f),
-                            CircleShape
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Navigation,
-                        contentDescription = "Sentido $roundedDeg° $cardinal",
-                        modifier = Modifier
-                            .size((sizeDp * 0.65).dp)
-                            .rotate(animatedRotation),
-                        tint = if (isDarkMode) Color(0xFF00FF66) else Color(0xFFFFD54F) // Amarelo bússola ou verde neon
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(5.dp))
-
-                Text(
-                    text = "$roundedDeg° $cardinal",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isDarkMode) Color(0xFF00FF66) else Color.White
+                        .size((sizeDp * 0.65).dp)
+                        .rotate(animatedRotation),
+                    tint = arrowTint
                 )
             }
-        }
-    } else {
-        // Radar 360° Omnidirecional (Radial)
-        Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = if (isDarkMode) Color(0xFF2A1E0B) else Color(0xFFE65100).copy(alpha = 0.32f),
-            border = androidx.compose.foundation.BorderStroke(
-                1.dp,
-                Color(0xFFFF9800).copy(alpha = 0.55f)
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            Text(
+                text = positionLabel,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = textColor
             )
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = "🌐",
-                    fontSize = 12.sp
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = "360° Radial",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFFFFB74D)
-                )
-            }
         }
     }
 }
+
+/**
+ * Alias de compatibilidade com versões anteriores.
+ */
+@Composable
+fun RadarCompassBadge(
+    directionDeg: Double? = null,
+    isDarkMode: Boolean = false,
+    sizeDp: Int = 22,
+    relativeAngleDeg: Float = 0f
+) = RadarTargetPointerBadge(
+    relativeAngleDeg = relativeAngleDeg,
+    isDarkMode = isDarkMode,
+    sizeDp = sizeDp
+)
