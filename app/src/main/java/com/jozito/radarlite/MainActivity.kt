@@ -153,6 +153,7 @@ fun RadarLiteApp() {
     var baseAlertTime by remember { mutableIntStateOf(prefs.baseAlertTime) }
     var aggressiveAlertTime by remember { mutableIntStateOf(prefs.aggressiveAlertTime) }
     var minAlertDistance by remember { mutableIntStateOf(prefs.minAlertDistance) }
+    var useCenterBigCard by remember { mutableStateOf(prefs.useCenterBigCard) }
 
     // Fase 9: Filtro Anti-Falsos Positivos (OSM e Blacklist)
     var blockOsmRadars by remember { mutableStateOf(prefs.blockOsmRadars) }
@@ -865,6 +866,42 @@ fun RadarLiteApp() {
                                 isHudModeEnabled = isChecked
                                 prefs.isHudModeEnabled = isChecked
                                 RadarOverlayService.setHudMode(isChecked)
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Switch: Modo Card Central Expandido
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Text(
+                                text = "Modo Card Central Expandido",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 15.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Exibe o alerta em tamanho grande no centro da tela. Toque no card para ocultá-lo naquele instante sem banir o radar.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                            )
+                        }
+
+                        Switch(
+                            checked = useCenterBigCard,
+                            onCheckedChange = { isChecked ->
+                                useCenterBigCard = isChecked
+                                prefs.useCenterBigCard = isChecked
+                                RadarOverlayService.setCenterBigCard(isChecked)
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = MaterialTheme.colorScheme.primary,
@@ -1712,12 +1749,28 @@ fun RadarLiteApp() {
                         Spacer(modifier = Modifier.height(10.dp))
                     }
 
+                    // Versão 1.2.2
+                    item {
+                        ChangelogVersionCard(
+                            version = "v1.2.2",
+                            buildNumber = "Build 4",
+                            isLatest = true,
+                            date = "Novembro 2026",
+                            items = listOf(
+                                "📐 Padronização Visual dos Cards: Os cards do modo normal e do alerta estático agora têm exatamente o mesmo tamanho e proporções do card agressivo, eliminando qualquer salto visual na tela.",
+                                "🖥️ Modo Card Central Expandido: Nova opção nas configurações para exibir o radar em um card bem maior no centro da tela com máxima legibilidade.",
+                                "👆 Toque Rápido para Ocultar: Toque no corpo do card a qualquer momento para ocultá-lo naquele instante, sem adicioná-lo à blacklist."
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
                     // Versão 1.2.1
                     item {
                         ChangelogVersionCard(
                             version = "v1.2.1",
                             buildNumber = "Build 3",
-                            isLatest = true,
+                            isLatest = false,
                             date = "Novembro 2026",
                             items = listOf(
                                 "🛡️ Piso Mínimo de Segurança Urbana (200m): Previne que alertas em baixa velocidade (ex: radares de 40 km/h na cidade ou em trânsito lento) apareçam tardiamente a 50m-80m.",

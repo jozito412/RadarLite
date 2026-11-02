@@ -1,5 +1,6 @@
 package com.jozito.radarlite
 
+import com.jozito.radarlite.data.PreferencesManager
 import com.jozito.radarlite.data.RadarEntity
 import com.jozito.radarlite.service.RadarOverlayService
 import kotlin.math.roundToInt
@@ -641,6 +642,18 @@ class RadarOverlayServiceTest {
     fun testActionStopConstantAndContract() {
         assertEquals("ACTION_STOP", RadarOverlayService.ACTION_STOP)
         assertEquals("com.jozito412.radarlite.ACTION_STATE_CHANGED", RadarOverlayService.ACTION_STATE_CHANGED)
+    }
+
+    @Test
+    fun testCenterBigCardStateAndPreferenceContract() {
+        assertFalse(PreferencesManager.DEFAULT_USE_CENTER_BIG_CARD)
+        assertEquals("use_center_big_card", PreferencesManager.KEY_USE_CENTER_BIG_CARD)
+
+        RadarOverlayService.setCenterBigCard(true)
+        assertTrue(RadarOverlayService.isCenterBigCard.value)
+
+        RadarOverlayService.setCenterBigCard(false)
+        assertFalse(RadarOverlayService.isCenterBigCard.value)
     }
 
     @Test

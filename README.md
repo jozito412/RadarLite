@@ -2,13 +2,13 @@
   <img src="./RadarLite_icon.png" width="128" height="128" alt="RadarLite Icon" />
 </p>
 
-# 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.2.1)
+# 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.2.2)
 
 [![Android](https://img.shields.io/badge/Android-8.0%2B%20(API%2026%2B)-3DDC84?logo=android&logoColor=white)](#)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-7F52FF?logo=kotlin&logoColor=white)](#)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white)](#)
 [![Room](https://img.shields.io/badge/Room-SQLite%20Offline-FF6F00)](#)
-[![Versão](https://img.shields.io/badge/Versão-1.2.1-brightgreen)](#)
+[![Versão](https://img.shields.io/badge/Versão-1.2.2-brightgreen)](#)
 
 **RadarLite** é um aplicativo Android veicular de alta performance, leve, 100% offline e com interface moderna em **Jetpack Compose**. Projetado especificamente para motoristas e centrais multimídia automotivas, ele funciona como uma camada flutuante inteligente (*overlay*) sobre o Waze, Google Maps ou qualquer outro app de navegação.
 
@@ -16,7 +16,7 @@
 
 ## 📦 Download do Instalador
 
-Você pode baixar diretamente o instalador compilado da versão mais recente (**v1.2.1 - Build 3**):
+Você pode baixar diretamente o instalador compilado da versão mais recente (**v1.2.2 - Build 4**):
 - 📲 **[RadarLite.apk](./RadarLite.apk)** (Instalador oficial pronto para Android)
 
 ---
@@ -24,6 +24,11 @@ Você pode baixar diretamente o instalador compilado da versão mais recente (**
 ## 🌟 Principais Recursos
 
 ### 1. 🪟 Janela Flutuante Inteligente (Overlay HUD)
+- **Tamanho Consistente dos Cards:**
+  - Os cards do **Modo Normal**, **Alerta Estático** e **Alerta Agressivo** possuem exatamente o mesmo tamanho e estrutura visual, garantindo estabilidade e harmonia estética sem saltos na tela ao ultrapassar ou respeitar a velocidade.
+- **Modo Card Central Expandido:**
+  - Opção para exibir o alerta em tamanho grande no centro da tela para centrais multimídia.
+  - **Toque para Ocultar:** Toque no corpo do card a qualquer momento para ocultá-lo naquele instante, sem adicioná-lo à blacklist.
 - **Card Dinâmico em 3 Estágios:**
   - 🟢 **Modo Normal:** Alerta discreto quando a velocidade do veículo está dentro do limite da via, exibindo placa oficial de trânsito, distância em tempo real e tipo do radar.
   - 🟡 **Alerta Estático (Atenção Antecipada):** Fundo vermelho sólido e claro que avisa com suavidade que o veículo ultrapassou o limite enquanto ainda há tempo hábil para desaceleração suave.
@@ -145,6 +150,11 @@ cd RadarLite
 ---
 
 ## 📜 Histórico de Versões (Changelog)
+
+### [v1.2.2 (Build 4)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.2) — *Novembro 2026*
+- 📐 **Padronização de Tamanho dos Cards:** Cards do modo normal e do alerta estático unificados com as mesmas dimensões e proporções do card agressivo, eliminando mudanças abruptas de tamanho na tela.
+- 🖥️ **Modo Card Central Expandido:** Nova opção configurável para exibir alertas em tamanho grande centralizados na tela para máxima visibilidade em centrais multimídia.
+- 👆 **Toque Rápido para Ocultar:** Toque no corpo do card a qualquer momento para ocultá-lo naquele instante, sem adicioná-lo à blacklist.
 
 ### [v1.2.1 (Build 3)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.1) — *Novembro 2026*
 - 🛑 **Ação Rápida na Notificação:** Botão de ação "Desativar" diretamente na notificação contínua do Foreground Service, permitindo encerrar o serviço em segundo plano com um único toque sem abrir o app.

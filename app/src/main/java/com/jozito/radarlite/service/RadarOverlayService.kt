@@ -47,10 +47,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -160,7 +162,46 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     // WindowManager e ComposeView do Overlay
     private var windowManager: WindowManager? = null
     private var overlayComposeView: ComposeView? = null
+    private var overlayLayoutParams: WindowManager.LayoutParams? = null
     private var isOverlayAttached: Boolean = false
+
+    // Conjunto de IDs de radares temporariamente ocultados pelo motorista (ao tocar no card naquele instante)
+    private val temporarilyDismissedRadarIds = mutableSetOf<Long>()
+
+    /**
+     * Oculta temporariamente o alerta do radar naquele instante sem enviá-lo para a blacklist.
+     * O radar voltará a alertar normalmente em viagens futuras ou após o veículo se afastar.
+     */
+    fun dismissRadarTemporarily(radarId: Long) {
+        temporarilyDismissedRadarIds.add(radarId)
+        if (_closestRadar.value?.radar?.id == radarId) {
+            val next = _nearbyRadars.value.firstOrNull { it.radar.id !in temporarilyDismissedRadarIds }
+            _closestRadar.value = next
+        }
+        Toast.makeText(applicationContext, "Alerta ocultado", Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * Atualiza a posição do overlay entre o centro da tela (Modo Card Central Expandido)
+     * e o topo da tela (Modo Padrão).
+     */
+    fun updateOverlayPosition(useCenter: Boolean) {
+        val params = overlayLayoutParams ?: return
+        val composeView = overlayComposeView ?: return
+        val wm = windowManager ?: return
+        if (useCenter) {
+            params.gravity = Gravity.CENTER
+            params.y = 0
+        } else {
+            params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            params.y = 50
+        }
+        try {
+            wm.updateViewLayout(composeView, params)
+        } catch (e: Exception) {
+            Log.e(TAG, "Erro ao atualizar layout do overlay", e)
+        }
+    }
 
     // Suporte aos donos da árvore Compose
     private val serviceViewModelStore = ViewModelStore()
@@ -301,6 +342,26 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
         fun setHudMode(enabled: Boolean) {
             _isHudMode.value = enabled
+        }
+
+        // Referência da instância ativa do serviço para controle dinâmico da janela flutuante
+        private var activeInstance: RadarOverlayService? = null
+
+        // Modo Card Central Expandido (card grande centralizado na tela que pode ser ocultado ao tocar)
+        private val _isCenterBigCard = MutableStateFlow(false)
+        val isCenterBigCard: StateFlow<Boolean> = _isCenterBigCard.asStateFlow()
+
+        fun setCenterBigCard(enabled: Boolean) {
+            _isCenterBigCard.value = enabled
+            activeInstance?.updateOverlayPosition(enabled)
+        }
+
+        /**
+         * Oculta temporariamente o alerta do radar mais próximo naquele instante sem adicioná-lo à blacklist.
+         */
+        fun dismissCurrentRadarTemporarily() {
+            val currentId = closestRadar.value?.radar?.id ?: return
+            activeInstance?.dismissRadarTemporarily(currentId)
         }
 
         /**
@@ -862,8 +923,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         radarDao = RadarDatabase.getDatabase(applicationContext).radarDao()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         preferencesManager = PreferencesManager.getInstance(applicationContext)
+        activeInstance = this
         _isNightMode.value = preferencesManager.isNightModeEnabled
         _isHudMode.value = preferencesManager.isHudModeEnabled
+        _isCenterBigCard.value = preferencesManager.useCenterBigCard
 
         initSoundPool()
         createNotificationChannel()
@@ -887,6 +950,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             stopGpsWatchdog()
             stopLocationUpdates()
             removeOverlayWindow()
+            temporarilyDismissedRadarIds.clear()
             stopForeground(STOP_FOREGROUND_REMOVE)
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             notificationManager?.cancel(NOTIFICATION_ID)
@@ -912,6 +976,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "Destruindo RadarOverlayService e liberando recursos")
+        if (activeInstance == this) {
+            activeInstance = null
+        }
+        temporarilyDismissedRadarIds.clear()
         _isRunning.value = false
         broadcastState(applicationContext, false)
         _isGpsLost.value = false
@@ -948,6 +1016,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
+        val useCenter = _isCenterBigCard.value
         // FLAG_NOT_FOCUSABLE garante que os toques passem direto para a multimídia do carro
         val layoutParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -958,9 +1027,15 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            y = 50 // Distância do topo da tela da multimídia
+            if (useCenter) {
+                gravity = Gravity.CENTER
+                y = 0
+            } else {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                y = 50 // Distância do topo da tela da multimídia
+            }
         }
+        overlayLayoutParams = layoutParams
 
         val composeView = ComposeView(this).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -1059,8 +1134,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     /**
      * UI Flutuante Reativa:
      * - Se closestRadar == null: invisível / vazia (não obstrui a tela nem toques).
-     * - Se currentSpeedKmh <= closestRadar.speedLimit: janela pequena com fundo verde/cinza escuro.
-     * - Se currentSpeedKmh > closestRadar.speedLimit: alerta progressivo (estático ou agressivo).
+     * - Se isCenterBigCard: card grande centralizado na tela que pode ser ocultado com um toque.
+     * - Modo Normal / Estático / Agressivo: cards padronizados com o mesmo tamanho e proporção.
      */
     @Composable
     private fun RadarFloatingOverlayContent() {
@@ -1069,6 +1144,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         val isGpsLostState by isGpsLost.collectAsState()
         val isNightMode by isNightMode.collectAsState()
         val isHudMode by isHudMode.collectAsState()
+        val isCenterBigCardState by isCenterBigCard.collectAsState()
         val isDarkMode = isNightMode || isHudMode
 
         // Efeito HUD (Head-Up Display): APENAS espelha horizontalmente se o modo HUD estiver ativo!
@@ -1101,6 +1177,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
                     val haptic = LocalHapticFeedback.current
 
+                    val onDismissClick = {
+                        dismissRadarTemporarily(radar.id)
+                    }
+
                     val onBanClick = {
                         banCurrentRadar(global = false)
                     }
@@ -1119,9 +1199,26 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                     // Fase 11: Se timeToCollision <= aggressive_alert_time E currentSpeedKmh > radar.speedLimit -> Alerta Agressivo
                     val isAggressive = isOverSpeed && (nearby.timeToCollisionSec <= aggressiveAlertTime.toDouble() || nearby.isAggressiveAlert)
 
-                    if (!isOverSpeed) {
+                    if (isCenterBigCardState) {
+                        // Modo Card Central Expandido (aparece no meio da tela e fecha ao clicar nele)
+                        BigCenterRadarOverlay(
+                            distanceMeters = distance,
+                            speedLimit = speedLimit,
+                            currentSpeed = speedState.toInt(),
+                            radarType = radar.type,
+                            isDarkMode = isDarkMode,
+                            source = radar.source,
+                            directionDeg = radar.bearing,
+                            relativeAngleDeg = nearby.relativeAngleDeg,
+                            isOverSpeed = isOverSpeed,
+                            isAggressive = isAggressive,
+                            onCardClick = onDismissClick,
+                            onBlacklistClick = onBanClick,
+                            onBlacklistLongClick = onBanLongClick
+                        )
+                    } else if (!isOverSpeed) {
                         // 1. Estado Verde/Neutro (Seguro): Se currentSpeed <= radar.speedLimit.
-                        // Card normal (tamanho padrão), cor verde ou cinza escuro.
+                        // Card padronizado no mesmo tamanho do alerta agressivo
                         NormalRadarOverlay(
                             distanceMeters = distance,
                             speedLimit = speedLimit,
@@ -1131,14 +1228,13 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                             source = radar.source,
                             directionDeg = radar.bearing,
                             relativeAngleDeg = nearby.relativeAngleDeg,
+                            onCardClick = onDismissClick,
                             onBlacklistClick = onBanClick,
                             onBlacklistLongClick = onBanLongClick
                         )
                     } else if (isAggressive) {
                         // 3. Estado Vermelho Agressivo (Perigo Iminente - Frenagem):
-                        // Se currentSpeed > radar.speedLimit E timeToCollision <= aggressive_alert_time.
-                        // O layout muda para expansivo, ocupando mais espaço. O fundo pisca agressivamente
-                        // (via InfiniteTransition de cor/opacidade) com o texto chamativo pedindo para reduzir.
+                        // O fundo pisca agressivamente com pulso de escala
                         AggressiveRadarOverlay(
                             distanceMeters = distance,
                             speedLimit = speedLimit,
@@ -1148,14 +1244,13 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                             source = radar.source,
                             directionDeg = radar.bearing,
                             relativeAngleDeg = nearby.relativeAngleDeg,
+                            onCardClick = onDismissClick,
                             onBlacklistClick = onBanClick,
                             onBlacklistLongClick = onBanLongClick
                         )
                     } else {
                         // 2. Estado Vermelho Estático (Atenção - Alerta Inicial):
-                        // Se currentSpeed > radar.speedLimit porém timeToCollision > aggressive_alert_time.
-                        // O card tem o mesmo tamanho compacto do estado verde, mas com o fundo Vermelho Sólido
-                        // (sem piscar nem alterar escala). Texto: "Acima do Limite".
+                        // Fundo Vermelho Sólido estático (sem piscar nem alterar escala).
                         WarningStaticRadarOverlay(
                             distanceMeters = distance,
                             speedLimit = speedLimit,
@@ -1165,6 +1260,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                             source = radar.source,
                             directionDeg = radar.bearing,
                             relativeAngleDeg = nearby.relativeAngleDeg,
+                            onCardClick = onDismissClick,
                             onBlacklistClick = onBanClick,
                             onBlacklistLongClick = onBanLongClick
                         )
@@ -1198,10 +1294,199 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     }
 
     /**
+     * Card Central Expandido (Modo Card Central):
+     * Exibido bem maior no centro da tela para máxima visibilidade.
+     * Ao clicar no card, ele é ocultado da tela naquele instante (sem adicionar à blacklist).
+     */
+    @OptIn(ExperimentalFoundationApi::class)
+    @Composable
+    private fun BigCenterRadarOverlay(
+        distanceMeters: Int,
+        speedLimit: Int,
+        currentSpeed: Int,
+        radarType: String,
+        isDarkMode: Boolean,
+        source: String? = null,
+        directionDeg: Double? = null,
+        relativeAngleDeg: Float = 0f,
+        isOverSpeed: Boolean,
+        isAggressive: Boolean,
+        onCardClick: () -> Unit,
+        onBlacklistClick: () -> Unit,
+        onBlacklistLongClick: (() -> Unit)? = null
+    ) {
+        val (typeIcon, typeLabel) = getRadarTypeInfo(radarType)
+        val infiniteTransition = rememberInfiniteTransition(label = "BigCenterTransition")
+
+        val animatedBgColor by infiniteTransition.animateColor(
+            initialValue = if (isAggressive) {
+                if (isDarkMode) Color(0xFF000000) else Color(0xFFD50000)
+            } else if (isOverSpeed) {
+                if (isDarkMode) Color(0xFF8B0000) else Color(0xFFD50000)
+            } else {
+                if (isDarkMode) Color(0xFF000000) else Color(0xFF1E2822).copy(alpha = 0.96f)
+            },
+            targetValue = if (isAggressive) {
+                if (isDarkMode) Color(0xFF4A0000) else Color(0xFF6B0000)
+            } else if (isOverSpeed) {
+                if (isDarkMode) Color(0xFF8B0000) else Color(0xFFD50000)
+            } else {
+                if (isDarkMode) Color(0xFF000000) else Color(0xFF1E2822).copy(alpha = 0.96f)
+            },
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 250, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "BigCenterBg"
+        )
+
+        val scalePulse by infiniteTransition.animateFloat(
+            initialValue = 1.0f,
+            targetValue = if (isAggressive) 1.03f else 1.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 250, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "BigCenterScale"
+        )
+
+        val borderColor = if (isAggressive) {
+            if (isDarkMode) Color(0xFFFF1744) else Color(0xFFFFFFFF)
+        } else if (isOverSpeed) {
+            if (isDarkMode) Color(0xFFFF5252) else Color(0xFFFFFFFF)
+        } else {
+            if (isDarkMode) Color(0xFF00FF66) else Color(0xFF4CAF50)
+        }
+
+        Card(
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = animatedBgColor
+            ),
+            modifier = Modifier
+                .wrapContentSize()
+                .widthIn(min = 340.dp, max = 460.dp)
+                .scale(scalePulse)
+                .padding(12.dp)
+                .shadow(if (isDarkMode) 0.dp else 24.dp, RoundedCornerShape(28.dp))
+                .border(3.5.dp, borderColor, RoundedCornerShape(28.dp))
+                .clickable {
+                    onCardClick()
+                }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Barra superior: Tipo de Radar + Botão ignorar
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = typeIcon, fontSize = 22.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isAggressive) "$typeLabel - REDUZA!" else if (isOverSpeed) "$typeLabel - ATENÇÃO" else typeLabel,
+                            color = if (isAggressive) Color(0xFFFF8A80) else if (isOverSpeed) Color(0xFFFFEB3B) else (if (isDarkMode) Color(0xFF00FF66) else Color(0xFF81C784)),
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+
+                    // Botão de banir na blacklist (❌)
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.4f))
+                            .combinedClickable(
+                                onClick = onBlacklistClick,
+                                onLongClick = onBlacklistLongClick
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Ignorar radar",
+                            tint = Color.White.copy(alpha = 0.9f),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Área Central Grande: Placa Gigante (76dp) + Velocidade Atual Gigante + Distância
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    SpeedLimitBadge(speedLimit = speedLimit, sizeDp = 76)
+
+                    Spacer(modifier = Modifier.width(24.dp))
+
+                    Column(horizontalAlignment = Alignment.Start) {
+                        Text(
+                            text = "$currentSpeed km/h",
+                            color = if (isOverSpeed) Color(0xFFFFEB3B) else (if (isDarkMode) Color(0xFF00FF66) else Color(0xFF4CAF50)),
+                            fontSize = 38.sp,
+                            fontWeight = FontWeight.Black,
+                            lineHeight = 40.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Radar a ${distanceMeters}m",
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            RadarTargetPointerBadge(
+                                relativeAngleDeg = relativeAngleDeg,
+                                isDarkMode = isDarkMode,
+                                sizeDp = 26
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Rodapé: Fonte/Azimute + Dica "Toque para ocultar"
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    RadarSourceBadge(
+                        source = source,
+                        directionDeg = directionDeg,
+                        textColor = Color.White.copy(alpha = 0.65f)
+                    )
+
+                    Text(
+                        text = "👆 Toque para ocultar",
+                        fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+    }
+
+    /**
      * Estado Vermelho Estático (Atenção - Alerta Inicial):
      * Usado quando currentSpeed > radar.speedLimit E timeToCollision > aggressive_alert_time.
-     * Possui exatamente o mesmo tamanho compacto do NormalRadarOverlay, porém com fundo Vermelho Sólido
-     * estático (sem piscar nem animar escala) e o texto "Acima do Limite".
+     * Possui exatamente o mesmo tamanho e proporção do AggressiveRadarOverlay e NormalRadarOverlay.
      */
     @OptIn(ExperimentalFoundationApi::class)
     @Composable
@@ -1214,62 +1499,84 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         source: String? = null,
         directionDeg: Double? = null,
         relativeAngleDeg: Float = 0f,
+        onCardClick: (() -> Unit)? = null,
         onBlacklistClick: () -> Unit,
         onBlacklistLongClick: (() -> Unit)? = null
     ) {
-        val (typeIcon, _) = getRadarTypeInfo(radarType)
+        val (typeIcon, typeLabel) = getRadarTypeInfo(radarType)
         val backgroundColor = if (isDarkMode) Color(0xFF8B0000) else Color(0xFFD50000)
         val borderColor = if (isDarkMode) Color(0xFFFF5252) else Color(0xFFFFFFFF)
 
         Card(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(
                 containerColor = backgroundColor
             ),
             modifier = Modifier
                 .wrapContentSize()
-                .padding(8.dp)
-                .shadow(if (isDarkMode) 0.dp else 12.dp, RoundedCornerShape(20.dp))
-                .border(2.dp, borderColor, RoundedCornerShape(20.dp))
+                .padding(10.dp)
+                .shadow(if (isDarkMode) 0.dp else 20.dp, RoundedCornerShape(24.dp))
+                .border(3.dp, borderColor, RoundedCornerShape(24.dp))
+                .clickable { onCardClick?.invoke() }
         ) {
             Row(
-                modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                modifier = Modifier.padding(start = 18.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
                 // Informações do radar (esquerda)
                 Column(
                     modifier = Modifier.padding(vertical = 4.dp),
-                    horizontalAlignment = Alignment.Start
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
+                    // Tipo de Radar no topo
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Placa de trânsito regulamentar
-                        SpeedLimitBadge(speedLimit = speedLimit, sizeDp = 46)
+                        Text(text = typeIcon, fontSize = 20.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "$typeLabel - ATENÇÃO",
+                            color = Color(0xFFFFEB3B),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
 
-                        Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
 
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = typeIcon,
-                                    fontSize = 15.sp
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Acima do Limite",
-                                    color = Color(0xFFFFEB3B),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                    Text(
+                        text = "LIMITE $speedLimit km/h",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        SpeedLimitBadge(speedLimit = speedLimit, sizeDp = 50)
+
+                        Spacer(modifier = Modifier.width(18.dp))
+
+                        Column(horizontalAlignment = Alignment.Start) {
+                            Text(
+                                text = "$currentSpeed km/h",
+                                color = Color(0xFFFFEB3B),
+                                fontSize = 26.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
                             Row(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "${distanceMeters}m",
+                                    text = "Radar a ${distanceMeters}m",
                                     color = Color.White,
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 RadarTargetPointerBadge(
@@ -1278,43 +1585,34 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                                     sizeDp = 22
                                 )
                             }
-                            Text(
-                                text = "Atual: $currentSpeed km/h",
-                                color = Color(0xFFFFCDD2),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
-                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(3.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
-                    // Transparência de Fonte (Fase 9) e Azimute Cadastrado
                     RadarSourceBadge(
                         source = source,
                         directionDeg = directionDeg,
-                        textColor = Color.White.copy(alpha = 0.65f)
+                        textColor = Color.White.copy(alpha = 0.6f)
                     )
                 }
 
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(12.dp))
 
-                // Divisor vertical sutil
                 Box(
                     modifier = Modifier
-                        .height(64.dp)
-                        .width(1.dp)
-                        .background(Color.White.copy(alpha = 0.25f))
+                        .height(96.dp)
+                        .width(1.5.dp)
+                        .background(Color.White.copy(alpha = 0.35f))
                 )
 
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(6.dp))
 
-                // Botão Gigante de Blacklist Híbrida (Fase 9.1 / 9.3: 72.dp com Toque Rápido e Toque Longo)
                 Box(
                     modifier = Modifier
                         .size(72.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color.Black.copy(alpha = 0.35f))
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color.Black.copy(alpha = 0.4f))
                         .combinedClickable(
                             onClick = onBlacklistClick,
                             onLongClick = onBlacklistLongClick
@@ -1330,14 +1628,14 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                             imageVector = Icons.Default.Close,
                             contentDescription = "Ignorar radar",
                             tint = Color.White.copy(alpha = 0.95f),
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(34.dp)
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "IGNORAR",
                             fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White.copy(alpha = 0.9f)
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White.copy(alpha = 0.95f)
                         )
                     }
                 }
@@ -1377,8 +1675,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     }
 
     /**
-     * Janela pequena e discreta (verde/cinza escuro) para quando o carro está dentro do limite.
-     * Exibe o ícone específico do tipo de radar (🚦 Semáforo, 📸 Fixo, 🚶 Lombada, ⏱️ Trecho).
+     * Janela no modo normal (dentro do limite da via).
+     * Padronizada para ter exatamente o mesmo tamanho e proporções do card agressivo.
      */
     @OptIn(ExperimentalFoundationApi::class)
     @Composable
@@ -1391,6 +1689,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         source: String? = null,
         directionDeg: Double? = null,
         relativeAngleDeg: Float = 0f,
+        onCardClick: (() -> Unit)? = null,
         onBlacklistClick: () -> Unit,
         onBlacklistLongClick: (() -> Unit)? = null
     ) {
@@ -1399,57 +1698,75 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         val borderColor = if (isDarkMode) Color(0xFF00FF66) else Color(0xFF4CAF50)
 
         Card(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(
                 containerColor = backgroundColor
             ),
             modifier = Modifier
                 .wrapContentSize()
-                .padding(8.dp)
-                .shadow(if (isDarkMode) 0.dp else 12.dp, RoundedCornerShape(20.dp))
-                .border(2.dp, borderColor, RoundedCornerShape(20.dp))
+                .padding(10.dp)
+                .shadow(if (isDarkMode) 0.dp else 20.dp, RoundedCornerShape(24.dp))
+                .border(3.dp, borderColor, RoundedCornerShape(24.dp))
+                .clickable { onCardClick?.invoke() }
         ) {
             Row(
-                modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                modifier = Modifier.padding(start = 18.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
                 // Informações do radar (esquerda)
                 Column(
                     modifier = Modifier.padding(vertical = 4.dp),
-                    horizontalAlignment = Alignment.Start
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
+                    // Tipo de Radar no topo
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = typeIcon, fontSize = 20.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = typeLabel,
+                            color = if (isDarkMode) Color(0xFF00FF66) else Color(0xFF81C784),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = "LIMITE $speedLimit km/h",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        // Placa de trânsito regulamentar (círculo branco, borda vermelha)
-                        SpeedLimitBadge(speedLimit = speedLimit, sizeDp = 44)
+                        SpeedLimitBadge(speedLimit = speedLimit, sizeDp = 50)
 
-                        Spacer(modifier = Modifier.width(14.dp))
+                        Spacer(modifier = Modifier.width(18.dp))
 
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = typeIcon,
-                                    fontSize = 15.sp
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = typeLabel,
-                                    color = if (isDarkMode) Color(0xFF00FF66) else Color(0xFF81C784),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
+                        Column(horizontalAlignment = Alignment.Start) {
+                            Text(
+                                text = "$currentSpeed km/h",
+                                color = if (isDarkMode) Color(0xFF00FF66) else Color(0xFF4CAF50),
+                                fontSize = 26.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
                             Row(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "${distanceMeters}m",
-                                    color = if (isDarkMode) Color(0xFF00FF66) else Color(0xFF4CAF50),
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.Bold
+                                    text = "Radar a ${distanceMeters}m",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 RadarTargetPointerBadge(
@@ -1458,43 +1775,34 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                                     sizeDp = 22
                                 )
                             }
-                            Text(
-                                text = "Atual: $currentSpeed km/h",
-                                color = Color(0xFFB0BEC5),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
-                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
-                    // Transparência de Fonte (Fase 9) e Azimute Cadastrado
                     RadarSourceBadge(
                         source = source,
                         directionDeg = directionDeg,
-                        textColor = Color.White.copy(alpha = 0.55f)
+                        textColor = Color.White.copy(alpha = 0.6f)
                     )
                 }
 
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(12.dp))
 
-                // Divisor vertical sutil
                 Box(
                     modifier = Modifier
-                        .height(64.dp)
-                        .width(1.dp)
-                        .background(Color.White.copy(alpha = 0.25f))
+                        .height(96.dp)
+                        .width(1.5.dp)
+                        .background(Color.White.copy(alpha = 0.35f))
                 )
 
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(6.dp))
 
-                // Botão Gigante de Blacklist Híbrida (Fase 9.1 / 9.3: 72.dp com Toque Rápido e Toque Longo)
                 Box(
                     modifier = Modifier
                         .size(72.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color.Black.copy(alpha = 0.35f))
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color.Black.copy(alpha = 0.4f))
                         .combinedClickable(
                             onClick = onBlacklistClick,
                             onLongClick = onBlacklistLongClick
@@ -1510,14 +1818,14 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                             imageVector = Icons.Default.Close,
                             contentDescription = "Ignorar radar",
                             tint = Color.White.copy(alpha = 0.95f),
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(34.dp)
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "IGNORAR",
                             fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White.copy(alpha = 0.9f)
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White.copy(alpha = 0.95f)
                         )
                     }
                 }
@@ -1526,7 +1834,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     }
 
     /**
-     * Layout maior com fundo vermelho piscando agressivamente via InfiniteTransition.
+     * Layout com fundo vermelho piscando agressivamente via InfiniteTransition.
      * Exibe o ícone e rótulo do tipo de radar com aviso incisivo de redução.
      */
     @OptIn(ExperimentalFoundationApi::class)
@@ -1540,6 +1848,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         source: String? = null,
         directionDeg: Double? = null,
         relativeAngleDeg: Float = 0f,
+        onCardClick: (() -> Unit)? = null,
         onBlacklistClick: () -> Unit,
         onBlacklistLongClick: (() -> Unit)? = null
     ) {
@@ -1579,6 +1888,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                 .padding(10.dp)
                 .shadow(if (isDarkMode) 0.dp else 20.dp, RoundedCornerShape(24.dp))
                 .border(3.dp, if (isDarkMode) Color(0xFFFF1744) else Color(0xFFFFFFFF), RoundedCornerShape(24.dp))
+                .clickable { onCardClick?.invoke() }
         ) {
             Row(
                 modifier = Modifier.padding(start = 18.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
@@ -2025,6 +2335,11 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         var shouldTriggerSound = false
 
         for (radar in candidates) {
+            // Se o alerta deste radar foi temporariamente ocultado ao tocar no card naquele instante, ignora
+            if (radar.id in temporarilyDismissedRadarIds) {
+                continue
+            }
+
             // Fase 9.2: Primeira regra de filtro - Blacklist Vetorial Direcional (Cone de Bloqueio de 60°)
             if (isApproachBanned(radar.id, vehicleBearingForCheck, bannedApproaches)) {
                 continue
@@ -2116,6 +2431,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         val currentNearbyIds = matchingRadars.map { it.radar.id }.toSet()
         radarDistanceHistory.keys.retainAll(currentNearbyIds)
 
+        // Limpa do conjunto temporário radares que já saíram das proximidades físicas
+        val candidateIds = candidates.map { it.id }.toSet()
+        temporarilyDismissedRadarIds.retainAll(candidateIds)
+
         val sortedAlerts = matchingRadars.sortedBy { it.distanceMeters }
         _nearbyRadars.value = sortedAlerts
         val closest = sortedAlerts.firstOrNull()
@@ -2173,6 +2492,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         val effectiveVehicleBearing = lastValidBearing ?: if (location.hasBearing() && location.bearing != 0.0f) location.bearing else null
 
         for (radar in candidates) {
+            if (radar.id in temporarilyDismissedRadarIds) {
+                continue
+            }
+
             // Fase 9.2: Primeira regra de filtro - Blacklist Vetorial Direcional (Cone de Bloqueio de 60°)
             if (isApproachBanned(radar.id, effectiveVehicleBearing, bannedApproaches)) {
                 continue

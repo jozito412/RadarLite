@@ -48,6 +48,15 @@ class PreferencesManager(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_IS_HUD_MODE_ENABLED, value).apply()
 
     /**
+     * Define se o alerta flutuante deve ser exibido em card grande centralizado na tela.
+     * Quando true, posiciona o card no centro da tela com dimensões ampliadas.
+     * Ao clicar no card, ele é ocultado temporariamente naquele instante (sem adicionar à blacklist).
+     */
+    var useCenterBigCard: Boolean
+        get() = prefs.getBoolean(KEY_USE_CENTER_BIG_CARD, DEFAULT_USE_CENTER_BIG_CARD)
+        set(value) = prefs.edit().putBoolean(KEY_USE_CENTER_BIG_CARD, value).apply()
+
+    /**
      * Define se a inicialização automática do RadarOverlayService está ativada (Boot, Ignição/Screen On ou Bluetooth).
      * Mapeia para a chave "is_autostart_enabled" com sincronização com a chave histórica de bluetooth.
      */
@@ -357,6 +366,8 @@ class PreferencesManager(context: Context) {
         const val KEY_IS_SOUND_ENABLED = "is_sound_enabled"
         const val KEY_IS_NIGHT_MODE_ENABLED = "is_night_mode_enabled"
         const val KEY_IS_HUD_MODE_ENABLED = "is_hud_mode_enabled"
+        const val KEY_USE_CENTER_BIG_CARD = "use_center_big_card"
+        const val DEFAULT_USE_CENTER_BIG_CARD = false
         const val KEY_IS_AUTOSTART_ENABLED = "is_autostart_enabled"
         const val KEY_IS_BT_AUTOSTART_ENABLED = "is_bt_autostart_enabled"
         const val KEY_IS_SERVICE_INTENTIONALLY_STOPPED = "is_service_intentionally_stopped"
