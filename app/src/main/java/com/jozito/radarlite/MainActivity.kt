@@ -1721,6 +1721,7 @@ fun RadarLiteApp() {
                             date = "Novembro 2026",
                             items = listOf(
                                 "🛡️ Piso Mínimo de Segurança Urbana (200m): Previne que alertas em baixa velocidade (ex: radares de 40 km/h na cidade ou em trânsito lento) apareçam tardiamente a 50m-80m.",
+                                "🛑 Ação Rápida na Notificação: Botão 'Desativar' na barra de notificações para encerrar o serviço em segundo plano com um toque, sem precisar abrir o app.",
                                 "⚙️ Configuração de Piso Mínimo: Novo controle deslizante nas configurações para ajustar a distância de piso de segurança (100m a 350m, padrão 200m).",
                                 "📐 Fórmula Híbrida Distância x TTC: Combina o piso físico garantido na cidade com a projeção temporal dinâmica do TTC em altas velocidades na rodovia."
                             )

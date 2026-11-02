@@ -638,6 +638,12 @@ class RadarOverlayServiceTest {
     }
 
     @Test
+    fun testActionStopConstantAndContract() {
+        assertEquals("ACTION_STOP", RadarOverlayService.ACTION_STOP)
+        assertEquals("com.jozito412.radarlite.ACTION_STATE_CHANGED", RadarOverlayService.ACTION_STATE_CHANGED)
+    }
+
+    @Test
     fun testFase12DirectionalHeadingAndBearingFormat() {
         // Normalização de graus para rotação de bússola
         fun normalizeDegrees(deg: Double): Int = (((deg.roundToInt() % 360) + 360) % 360)

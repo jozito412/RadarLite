@@ -885,7 +885,13 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             _isGpsLost.value = false
             _closestRadarAlertDistance.value = PreferencesManager.DEFAULT_DIST_HIGHWAY.toFloat()
             stopGpsWatchdog()
+            stopLocationUpdates()
+            removeOverlayWindow()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            notificationManager?.cancel(NOTIFICATION_ID)
             stopSelf()
+            Toast.makeText(applicationContext, "Monitoramento desativado", Toast.LENGTH_SHORT).show()
             return START_NOT_STICKY
         }
 
@@ -915,6 +921,9 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         releaseWakeLock()
         removeOverlayWindow()
         releaseSoundPool()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        notificationManager?.cancel(NOTIFICATION_ID)
         serviceViewModelStore.clear()
     }
 
@@ -2240,7 +2249,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     }
 
     /**
-     * Cria a notificação contínua do Foreground Service com Intent para reabertura da MainActivity.
+     * Cria a notificação contínua do Foreground Service com Intent para reabertura da MainActivity
+     * e ação rápida na barra de notificações para desativar o serviço sem precisar abrir o app.
      */
     private fun buildForegroundNotification(): Notification {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
@@ -2255,12 +2265,28 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             null
         }
 
+        // Ação rápida para desativar o monitoramento diretamente pela barra de notificações
+        val stopIntent = Intent(this, RadarOverlayService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val stopPendingIntent = PendingIntent.getService(this, 1, stopIntent, stopPendingFlags)
+
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle("RadarLite Ativo")
             .setContentText("Monitorando radares e velocidade em tempo real...")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Desativar",
+                stopPendingIntent
+            )
             .apply {
                 if (pendingIntent != null) {
                     setContentIntent(pendingIntent)

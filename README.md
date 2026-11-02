@@ -147,6 +147,7 @@ cd RadarLite
 ## 📜 Histórico de Versões (Changelog)
 
 ### [v1.2.1 (Build 3)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.1) — *Novembro 2026*
+- 🛑 **Ação Rápida na Notificação:** Botão de ação "Desativar" diretamente na notificação contínua do Foreground Service, permitindo encerrar o serviço em segundo plano com um único toque sem abrir o app.
 - 🛡️ **Piso Mínimo de Segurança Urbana (200m):** Elimina o problema de alertas tardios em radares urbanos de 40 km/h ou no trânsito lento, assegurando antecedência mínima física configurável (100m a 350m, padrão 200m).
 - 📐 **Fórmula Híbrida Distância x TTC:** Combina o piso físico garantido na cidade com a fluidez temporal proporcional do TTC em altas velocidades na rodovia.
 - ⚙️ **Slider de Distância de Piso:** Novo ajuste na tela de configurações para personalizar o piso de segurança.
