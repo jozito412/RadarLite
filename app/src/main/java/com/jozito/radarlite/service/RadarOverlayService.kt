@@ -544,14 +544,24 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             return baseSec * factor
         }
 
+        const val DEFAULT_MIN_ALERT_DISTANCE_METERS = 200.0
+
         /**
-         * Fase 11: Verifica se o veículo entrou na zona de alerta dinâmico por TTC.
+         * Fase 11 + Piso de Segurança Urbana:
+         * O veículo entra na zona de alerta se:
+         * 1. A distância física for menor ou igual ao piso mínimo de segurança (minAlertDistanceMeters, padrão: 200m).
+         *    Garante que em vias urbanas (ex: radares de 40 km/h) o aviso nunca apareça apenas nos últimos 50m-80m.
+         * OU
+         * 2. O tempo de colisão (TTC) for menor ou igual ao limite dinâmico (dynamicAlertLimit).
+         *    Em velocidades mais altas (rodovia), o TTC expande o alcance suavemente até 500m.
          */
         fun isWithinTimeToCollisionAlert(
             distanceMeters: Double,
             currentSpeedKmh: Float,
-            baseAlertTime: Int = PreferencesManager.DEFAULT_BASE_ALERT_TIME
+            baseAlertTime: Int = PreferencesManager.DEFAULT_BASE_ALERT_TIME,
+            minAlertDistanceMeters: Double = DEFAULT_MIN_ALERT_DISTANCE_METERS
         ): Boolean {
+            if (distanceMeters <= minAlertDistanceMeters) return true
             val ttc = calculateTimeToCollision(distanceMeters, currentSpeedKmh)
             val limit = calculateDynamicAlertLimit(currentSpeedKmh, baseAlertTime)
             return ttc <= limit
@@ -1977,9 +1987,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         }
         val effectiveVehicleBearing = lastValidBearing
 
-        // Fase 11: Configurações mestre de tempo TTC (Tempo de Colisão)
+        // Fase 11: Configurações mestre de tempo TTC (Tempo de Colisão) e Piso de Segurança
         val baseAlertTime = preferencesManager.baseAlertTime
         val aggressiveAlertTime = preferencesManager.aggressiveAlertTime
+        val minAlertDistance = preferencesManager.minAlertDistance.toDouble()
 
         // Fase 9 e 9.2: Filtro Anti-Falsos Positivos (OSM e Blacklist Vetorial Direcional)
         val blockOsm = preferencesManager.blockOsmRadars
@@ -2030,8 +2041,9 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             // Fase 11: timeToCollision = distanceMeters / speedMs
             val timeToCollision = distanceMeters / speedMs
 
-            // Regra de Disparo TTC: timeToCollision <= dynamicAlertLimit
-            if (timeToCollision <= dynamicAlertLimit) {
+            // Regra de Disparo TTC + Piso Mínimo de Segurança Urbana:
+            // Dispara se a distância for menor que o piso de segurança (ex: 200m) OU timeToCollision <= dynamicAlertLimit
+            if (isWithinTimeToCollisionAlert(distanceMeters.toDouble(), speedKmh, baseAlertTime, minAlertDistance)) {
                 // Melhoria 2: Cone Frontal Adaptativo (55° para radar 360°, 60° na cidade <= 60 km/h, 85° em rodovia)
                 val adaptiveFrontCone = getAdaptiveFrontConeAngle(speedKmh, radar.bearing != null)
                 val isFront = isInFrontOfVehicle(location, radarLocation, effectiveVehicleBearing, adaptiveFrontCone)
@@ -2056,11 +2068,12 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
                             val relativeAngle = calculateRelativeBearing(heading, bearingToRadar)
                             val isAggressive = (timeToCollision <= aggressiveAlertTime.toDouble()) && (speedKmh > radar.speedLimit)
+                            val alertDist = maxOf(minAlertDistance.toFloat(), (dynamicAlertLimit * speedMs).toFloat())
                             matchingRadars.add(
                                 NearbyRadar(
                                     radar = radar,
                                     distanceMeters = distanceMeters,
-                                    alertDistanceMeters = (dynamicAlertLimit * speedMs).toFloat(),
+                                    alertDistanceMeters = alertDist,
                                     timeToCollisionSec = timeToCollision.toDouble(),
                                     isAggressiveAlert = isAggressive,
                                     relativeAngleDeg = relativeAngle
@@ -2098,7 +2111,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         _nearbyRadars.value = sortedAlerts
         val closest = sortedAlerts.firstOrNull()
         _closestRadar.value = closest
-        _closestRadarAlertDistance.value = closest?.alertDistanceMeters ?: (dynamicAlertLimit * speedMs).toFloat()
+        _closestRadarAlertDistance.value = closest?.alertDistanceMeters ?: maxOf(minAlertDistance.toFloat(), (dynamicAlertLimit * speedMs).toFloat())
 
         if (shouldTriggerSound) {
             playBeep()
@@ -2121,6 +2134,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         customSpeedKmh: Float? = null,
         customBaseAlertTime: Int? = null,
         customAggressiveAlertTime: Int? = null,
+        customMinAlertDistance: Int? = null,
         customBlockOsm: Boolean? = null,
         customBlacklistedIds: Set<String>? = null,
         customDistLowSpeed: Int? = null,
@@ -2131,6 +2145,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         val speedKmh = customSpeedKmh ?: if (location.hasSpeed()) location.speed * 3.6f else 0f
         val baseAlertTime = customBaseAlertTime ?: if (::preferencesManager.isInitialized) preferencesManager.baseAlertTime else PreferencesManager.DEFAULT_BASE_ALERT_TIME
         val aggressiveAlertTime = customAggressiveAlertTime ?: if (::preferencesManager.isInitialized) preferencesManager.aggressiveAlertTime else PreferencesManager.DEFAULT_AGGRESSIVE_ALERT_TIME
+        val minAlertDistance = customMinAlertDistance ?: if (::preferencesManager.isInitialized) preferencesManager.minAlertDistance else PreferencesManager.DEFAULT_MIN_ALERT_DISTANCE
 
         val blockOsm = customBlockOsm ?: if (::preferencesManager.isInitialized) preferencesManager.blockOsmRadars else true
         val bannedApproaches = customBlacklistedIds ?: if (::preferencesManager.isInitialized) preferencesManager.bannedApproaches else emptySet()
@@ -2164,7 +2179,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             val distanceMeters = location.distanceTo(radarLocation)
             val timeToCollision = distanceMeters / speedMs
 
-            if (timeToCollision <= dynamicAlertLimit) {
+            // Regra de Disparo TTC + Piso Mínimo de Segurança Urbana:
+            if (isWithinTimeToCollisionAlert(distanceMeters.toDouble(), speedKmh, baseAlertTime, minAlertDistance.toDouble())) {
                 // Melhoria 2: Cone Frontal Adaptativo (55° para radar 360°, 60° na cidade <= 60 km/h, 85° em rodovia)
                 val adaptiveFrontCone = getAdaptiveFrontConeAngle(speedKmh, radar.bearing != null)
                 val isFront = isInFrontOfVehicle(location, radarLocation, effectiveVehicleBearing, adaptiveFrontCone)
@@ -2186,11 +2202,12 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                         if (isPositiveProjection) {
                             val relativeAngle = calculateRelativeBearing(heading, bearingToRadar)
                             val isAggressive = (timeToCollision <= aggressiveAlertTime.toDouble()) && (speedKmh > radar.speedLimit)
+                            val alertDist = maxOf(minAlertDistance.toFloat(), (dynamicAlertLimit * speedMs).toFloat())
                             matchingRadars.add(
                                 NearbyRadar(
                                     radar = radar,
                                     distanceMeters = distanceMeters,
-                                    alertDistanceMeters = (dynamicAlertLimit * speedMs).toFloat(),
+                                    alertDistanceMeters = alertDist,
                                     timeToCollisionSec = timeToCollision.toDouble(),
                                     isAggressiveAlert = isAggressive,
                                     relativeAngleDeg = relativeAngle

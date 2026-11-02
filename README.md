@@ -2,13 +2,13 @@
   <img src="./RadarLite_icon.png" width="128" height="128" alt="RadarLite Icon" />
 </p>
 
-# 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.2.0)
+# 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.2.1)
 
 [![Android](https://img.shields.io/badge/Android-8.0%2B%20(API%2026%2B)-3DDC84?logo=android&logoColor=white)](#)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-7F52FF?logo=kotlin&logoColor=white)](#)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white)](#)
 [![Room](https://img.shields.io/badge/Room-SQLite%20Offline-FF6F00)](#)
-[![Versão](https://img.shields.io/badge/Versão-1.2.0-brightgreen)](#)
+[![Versão](https://img.shields.io/badge/Versão-1.2.1-brightgreen)](#)
 
 **RadarLite** é um aplicativo Android veicular de alta performance, leve, 100% offline e com interface moderna em **Jetpack Compose**. Projetado especificamente para motoristas e centrais multimídia automotivas, ele funciona como uma camada flutuante inteligente (*overlay*) sobre o Waze, Google Maps ou qualquer outro app de navegação.
 
@@ -16,7 +16,7 @@
 
 ## 📦 Download do Instalador
 
-Você pode baixar diretamente o instalador compilado da versão mais recente (**v1.2.0 - Build 2**):
+Você pode baixar diretamente o instalador compilado da versão mais recente (**v1.2.1 - Build 3**):
 - 📲 **[RadarLite.apk](./RadarLite.apk)** (Instalador oficial pronto para Android)
 
 ---
@@ -145,6 +145,11 @@ cd RadarLite
 ---
 
 ## 📜 Histórico de Versões (Changelog)
+
+### [v1.2.1 (Build 3)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.1) — *Novembro 2026*
+- 🛡️ **Piso Mínimo de Segurança Urbana (200m):** Elimina o problema de alertas tardios em radares urbanos de 40 km/h ou no trânsito lento, assegurando antecedência mínima física configurável (100m a 350m, padrão 200m).
+- 📐 **Fórmula Híbrida Distância x TTC:** Combina o piso físico garantido na cidade com a fluidez temporal proporcional do TTC em altas velocidades na rodovia.
+- ⚙️ **Slider de Distância de Piso:** Novo ajuste na tela de configurações para personalizar o piso de segurança.
 
 ### [v1.2.0 (Build 2)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.0) — *Outubro 2026*
 - ⚡ **Alerta por Tempo de Colisão (TTC Dinâmico):** Substituição de distâncias fixas por tempo real de aproximação adaptativo (15s rodovia, 12s via expressa, 9s cidade).

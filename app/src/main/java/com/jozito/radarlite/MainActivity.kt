@@ -149,9 +149,10 @@ fun RadarLiteApp() {
     var lastSyncTimestamp by remember { mutableStateOf(prefs.lastSyncTimestamp) }
     var lastSyncCount by remember { mutableIntStateOf(prefs.lastSyncCount) }
 
-    // Fase 11: Tempo de Colisão (TTC) configurável
+    // Fase 11: Tempo de Colisão (TTC) e Piso Mínimo de Segurança configuráveis
     var baseAlertTime by remember { mutableIntStateOf(prefs.baseAlertTime) }
     var aggressiveAlertTime by remember { mutableIntStateOf(prefs.aggressiveAlertTime) }
+    var minAlertDistance by remember { mutableIntStateOf(prefs.minAlertDistance) }
 
     // Fase 9: Filtro Anti-Falsos Positivos (OSM e Blacklist)
     var blockOsmRadars by remember { mutableStateOf(prefs.blockOsmRadars) }
@@ -1119,16 +1120,52 @@ fun RadarLiteApp() {
                         )
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    // Informação visual sobre a Curva Dinâmica TTC e botão de redefinir padrões
+                    // 3. Piso Mínimo de Segurança Urbana (min_alert_distance - Padrão: 200m)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Curva adaptativa inteligente: ${((baseAlertTime * 0.6).roundToInt())}s na cidade (≤60 km/h), ${((baseAlertTime * 0.8).roundToInt())}s em via expressa (61-90 km/h) e ${baseAlertTime}s em rodovia (>90 km/h).",
+                            text = "Distância Mínima de Piso: ${minAlertDistance}m",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            text = "Padrão: 200m",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.tertiary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Slider(
+                        value = minAlertDistance.toFloat(),
+                        onValueChange = { newVal ->
+                            val snapped = (newVal / 10).roundToInt() * 10
+                            val clamped = snapped.coerceIn(100, 350)
+                            minAlertDistance = clamped
+                            prefs.minAlertDistance = clamped
+                        },
+                        valueRange = 100f..350f,
+                        steps = 24,
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.tertiary,
+                            activeTrackColor = MaterialTheme.colorScheme.tertiary
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Informação visual sobre a Curva Dinâmica TTC, Piso de Segurança e botão de redefinir padrões
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Curva inteligente: ${((baseAlertTime * 0.6).roundToInt())}s na cidade (≤60 km/h), ${((baseAlertTime * 0.8).roundToInt())}s em via expressa (61-90 km/h) e ${baseAlertTime}s em rodovia (>90 km/h). Piso mínimo garante aviso a ${minAlertDistance}m mesmo em baixas velocidades (ex: radares de 40 km/h).",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             modifier = Modifier.weight(1f).padding(end = 8.dp)
@@ -1138,8 +1175,10 @@ fun RadarLiteApp() {
                             onClick = {
                                 baseAlertTime = PreferencesManager.DEFAULT_BASE_ALERT_TIME
                                 aggressiveAlertTime = PreferencesManager.DEFAULT_AGGRESSIVE_ALERT_TIME
+                                minAlertDistance = PreferencesManager.DEFAULT_MIN_ALERT_DISTANCE
                                 prefs.baseAlertTime = baseAlertTime
                                 prefs.aggressiveAlertTime = aggressiveAlertTime
+                                prefs.minAlertDistance = minAlertDistance
                             }
                         ) {
                             Text("Padrão", fontSize = 12.sp)
@@ -1673,12 +1712,28 @@ fun RadarLiteApp() {
                         Spacer(modifier = Modifier.height(10.dp))
                     }
 
+                    // Versão 1.2.1
+                    item {
+                        ChangelogVersionCard(
+                            version = "v1.2.1",
+                            buildNumber = "Build 3",
+                            isLatest = true,
+                            date = "Novembro 2026",
+                            items = listOf(
+                                "🛡️ Piso Mínimo de Segurança Urbana (200m): Previne que alertas em baixa velocidade (ex: radares de 40 km/h na cidade ou em trânsito lento) apareçam tardiamente a 50m-80m.",
+                                "⚙️ Configuração de Piso Mínimo: Novo controle deslizante nas configurações para ajustar a distância de piso de segurança (100m a 350m, padrão 200m).",
+                                "📐 Fórmula Híbrida Distância x TTC: Combina o piso físico garantido na cidade com a projeção temporal dinâmica do TTC em altas velocidades na rodovia."
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
                     // Versão 1.2.0
                     item {
                         ChangelogVersionCard(
                             version = "v1.2.0",
                             buildNumber = "Build 2",
-                            isLatest = true,
+                            isLatest = false,
                             date = "Outubro 2026",
                             items = listOf(
                                 "⚡ Alerta por Tempo de Colisão (TTC): Alertas calculados em segundos dinâmicos (15s rodovia, 12s expressa, 9s cidade) substituindo distâncias fixas.",

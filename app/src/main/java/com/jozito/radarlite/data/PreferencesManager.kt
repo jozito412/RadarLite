@@ -126,6 +126,16 @@ class PreferencesManager(context: Context) {
         set(value) = prefs.edit().putInt(KEY_AGGRESSIVE_ALERT_TIME, value).apply()
 
     /**
+     * Distância mínima de piso para alerta (em metros).
+     * Garante que em vias urbanas de baixa velocidade (ex: radares de 40 km/h) ou no trânsito lento,
+     * o radar apareça com pelo menos esta distância de antecedência (evitando que surja a 50m-80m).
+     * Valor padrão: 200 metros.
+     */
+    var minAlertDistance: Int
+        get() = prefs.getInt(KEY_MIN_ALERT_DISTANCE, DEFAULT_MIN_ALERT_DISTANCE)
+        set(value) = prefs.edit().putInt(KEY_MIN_ALERT_DISTANCE, value).apply()
+
+    /**
      * Distância de alerta para vias de baixa velocidade (radares até 40 km/h).
      * @deprecated Substituído pela fórmula dinâmica TTC (base_alert_time / aggressive_alert_time).
      */
@@ -355,11 +365,13 @@ class PreferencesManager(context: Context) {
         const val KEY_LAST_SYNC_TIMESTAMP = "last_sync_timestamp"
         const val KEY_LAST_SYNC_COUNT = "last_sync_count"
 
-        // Fase 11: Fórmula de Alerta por Tempo de Colisão (TTC) Variável
+        // Fase 11: Fórmula de Alerta por Tempo de Colisão (TTC) Variável e Piso de Segurança
         const val KEY_BASE_ALERT_TIME = "base_alert_time"
         const val KEY_AGGRESSIVE_ALERT_TIME = "aggressive_alert_time"
+        const val KEY_MIN_ALERT_DISTANCE = "min_alert_distance"
         const val DEFAULT_BASE_ALERT_TIME = 15 // segundos
         const val DEFAULT_AGGRESSIVE_ALERT_TIME = 7 // segundos
+        const val DEFAULT_MIN_ALERT_DISTANCE = 200 // metros (piso de segurança urbana)
 
         // Fase 8: Distâncias customizáveis (legado mantido para migração limpa)
         const val KEY_DIST_LOW_SPEED = "dist_low_speed"

@@ -596,18 +596,28 @@ class RadarOverlayServiceTest {
         assertEquals(9.0, RadarOverlayService.calculateDynamicAlertLimit(40f, 15), 0.001)
         assertEquals(9.0, RadarOverlayService.calculateDynamicAlertLimit(10f, 15), 0.001)
 
-        // Disparo de Alerta TTC:
-        // Exemplo: Rodovia a 108 km/h (30 m/s), dynamicLimit = 15.0s -> distância máxima de alerta = 450m
+        // Disparo de Alerta TTC + Piso de Segurança Urbana:
+        // Exemplo 1: Rodovia a 108 km/h (30 m/s), dynamicLimit = 15.0s -> alcance TTC = 450m
         // A 400m: TTC = 13.33s <= 15s -> DEVE DISPARAR
         assertTrue(RadarOverlayService.isWithinTimeToCollisionAlert(distanceMeters = 400.0, currentSpeedKmh = 108f, baseAlertTime = 15))
-        // A 500m: TTC = 16.66s > 15s -> NÃO DISPARA
+        // A 500m: TTC = 16.66s > 15s e 500m > 200m -> NÃO DISPARA
         assertFalse(RadarOverlayService.isWithinTimeToCollisionAlert(distanceMeters = 500.0, currentSpeedKmh = 108f, baseAlertTime = 15))
 
-        // Exemplo: Cidade a 36 km/h (10 m/s), dynamicLimit = 9.0s -> distância máxima de alerta = 90m
-        // A 80m: TTC = 8.0s <= 9.0s -> DEVE DISPARAR
-        assertTrue(RadarOverlayService.isWithinTimeToCollisionAlert(distanceMeters = 80.0, currentSpeedKmh = 36f, baseAlertTime = 15))
-        // A 120m: TTC = 12.0s > 9.0s -> NÃO DISPARA (evita alarmes longos em baixa velocidade)
-        assertFalse(RadarOverlayService.isWithinTimeToCollisionAlert(distanceMeters = 120.0, currentSpeedKmh = 36f, baseAlertTime = 15))
+        // Exemplo 2: Cidade a 36 km/h (10 m/s) com Piso de Segurança padrão (200m):
+        // Garante que mesmo em baixa velocidade urbana (ex: radares de 40 km/h), o condutor seja avisado com antecedência
+        // A 180m: 180m <= 200m (piso) -> DEVE DISPARAR
+        assertTrue(RadarOverlayService.isWithinTimeToCollisionAlert(distanceMeters = 180.0, currentSpeedKmh = 36f, baseAlertTime = 15, minAlertDistanceMeters = 200.0))
+        // A 120m: 120m <= 200m (piso) -> DEVE DISPARAR
+        assertTrue(RadarOverlayService.isWithinTimeToCollisionAlert(distanceMeters = 120.0, currentSpeedKmh = 36f, baseAlertTime = 15, minAlertDistanceMeters = 200.0))
+        // A 220m: 220m > 200m (piso) e TTC = 22s > 9s -> NÃO DISPARA
+        assertFalse(RadarOverlayService.isWithinTimeToCollisionAlert(distanceMeters = 220.0, currentSpeedKmh = 36f, baseAlertTime = 15, minAlertDistanceMeters = 200.0))
+
+        // Exemplo 3: Modo TTC Puro (sem piso, minAlertDistanceMeters = 0.0):
+        // dynamicLimit = 9.0s -> alcance puro = 90m
+        // A 80m: TTC = 8.0s <= 9.0s -> DISPARA
+        assertTrue(RadarOverlayService.isWithinTimeToCollisionAlert(distanceMeters = 80.0, currentSpeedKmh = 36f, baseAlertTime = 15, minAlertDistanceMeters = 0.0))
+        // A 120m: TTC = 12.0s > 9.0s -> NÃO DISPARA
+        assertFalse(RadarOverlayService.isWithinTimeToCollisionAlert(distanceMeters = 120.0, currentSpeedKmh = 36f, baseAlertTime = 15, minAlertDistanceMeters = 0.0))
     }
 
     @Test
