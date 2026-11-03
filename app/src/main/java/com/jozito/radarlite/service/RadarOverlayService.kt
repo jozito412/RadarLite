@@ -2560,7 +2560,28 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     private fun startAsForegroundService() {
         val notification = buildForegroundNotification()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            try {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                )
+                Log.d(TAG, "startForeground iniciado com sucesso (SPECIAL_USE | LOCATION) no Android 14+")
+            } catch (e: Exception) {
+                Log.e(TAG, "Falha ao iniciar startForeground com LOCATION no Android 14+, aplicando fallback para SPECIAL_USE", e)
+                try {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                    )
+                    Log.d(TAG, "startForeground fallback para SPECIAL_USE concluído com sucesso")
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Falha crítica no fallback de startForeground", e2)
+                }
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
                 notification,

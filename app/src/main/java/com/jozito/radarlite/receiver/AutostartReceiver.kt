@@ -199,7 +199,7 @@ class AutostartReceiver : BroadcastReceiver() {
         if (action == ACTION_START || action == ACTION_START_ALT) {
             Log.i(TAG, "Comando remoto ACTION_START interceptado ($action). Android SDK_INT: ${Build.VERSION.SDK_INT}")
 
-            // 1. Atualiza a chave de intenção no PreferencesManager para 'desejado ativo'
+            // 1. Atualiza a flag no PreferencesManager (is_service_intentionally_stopped = false)
             prefs.isServiceIntentionallyStopped = false
 
             if (RadarOverlayService.isRunning.value) {
@@ -207,27 +207,20 @@ class AutostartReceiver : BroadcastReceiver() {
                 return
             }
 
-            // Validação de diagnóstico da permissão SYSTEM_ALERT_WINDOW (Bypass nativo do Android 10+)
-            val canDrawOverlays = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                android.provider.Settings.canDrawOverlays(context)
-            } else {
-                true
-            }
-            Log.d(TAG, "Diagnóstico SYSTEM_ALERT_WINDOW (canDrawOverlays): $canDrawOverlays")
-
-            // 2. Inicia o RadarOverlayService utilizando ContextCompat.startForegroundService envolvido em try-catch
-            val serviceIntent = createServiceIntent(context)
+            // 2. Inicia o serviço usando ContextCompat.startForegroundService envolvido em try-catch
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    Log.i(TAG, "Iniciando RadarOverlayService via ContextCompat.startForegroundService (Android O+ / API ${Build.VERSION.SDK_INT})...")
-                    ContextCompat.startForegroundService(context, serviceIntent)
+                val canDrawOverlays = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    android.provider.Settings.canDrawOverlays(context)
                 } else {
-                    Log.i(TAG, "Iniciando RadarOverlayService via context.startService (Legacy Android / API ${Build.VERSION.SDK_INT})...")
-                    context.startService(serviceIntent)
+                    true
                 }
-                Log.d(TAG, "RadarOverlayService iniciado com sucesso a partir de $action.")
+                Log.d("RadarLite", "Verificação SYSTEM_ALERT_WINDOW (canDrawOverlays): $canDrawOverlays - Android SDK: ${Build.VERSION.SDK_INT}")
+
+                val serviceIntent = createServiceIntent(context)
+                ContextCompat.startForegroundService(context, serviceIntent)
+                Log.d("RadarLite", "RadarOverlayService iniciado com sucesso a partir de $action via ContextCompat.startForegroundService")
             } catch (e: Exception) {
-                Log.e(TAG, "Falha ao iniciar RadarOverlayService remotamente a partir de $action (canDrawOverlays=$canDrawOverlays, SDK=${Build.VERSION.SDK_INT})", e)
+                Log.e("RadarLite", "Start block", e)
             }
             return
         }
