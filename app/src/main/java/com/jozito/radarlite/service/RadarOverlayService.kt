@@ -21,6 +21,7 @@ import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColor
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -345,7 +346,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         }
 
         // Referência da instância ativa do serviço para controle dinâmico da janela flutuante
-        private var activeInstance: RadarOverlayService? = null
+        internal var activeInstance: RadarOverlayService? = null
 
         // Modo Card Central Expandido (card grande centralizado na tela que pode ser ocultado ao tocar)
         private val _isCenterBigCard = MutableStateFlow(false)
@@ -416,10 +417,21 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
          */
         fun stop(context: Context) {
             PreferencesManager.getInstance(context).isServiceIntentionallyStopped = true
+            activeInstance?.stopMonitoring()
             val intent = Intent(context, RadarOverlayService::class.java).apply {
                 action = ACTION_STOP
             }
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    ContextCompat.startForegroundService(context, intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                context.stopService(intent)
+            }
             context.stopService(intent)
+            broadcastState(context, false)
         }
 
         /**
@@ -938,23 +950,30 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         broadcastState(applicationContext, true)
     }
 
+    /**
+     * Encerra imediatamente o rastreamento, remove a janela flutuante, cancela a notificação e desliga o serviço.
+     */
+    fun stopMonitoring() {
+        _isRunning.value = false
+        preferencesManager.isServiceIntentionallyStopped = true
+        broadcastState(applicationContext, false)
+        _isGpsLost.value = false
+        _closestRadarAlertDistance.value = PreferencesManager.DEFAULT_DIST_HIGHWAY.toFloat()
+        stopGpsWatchdog()
+        stopLocationUpdates()
+        removeOverlayWindow()
+        temporarilyDismissedRadarIds.clear()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        notificationManager?.cancel(NOTIFICATION_ID)
+        stopSelf()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
 
         if (intent?.action == ACTION_STOP) {
-            _isRunning.value = false
-            preferencesManager.isServiceIntentionallyStopped = true
-            broadcastState(applicationContext, false)
-            _isGpsLost.value = false
-            _closestRadarAlertDistance.value = PreferencesManager.DEFAULT_DIST_HIGHWAY.toFloat()
-            stopGpsWatchdog()
-            stopLocationUpdates()
-            removeOverlayWindow()
-            temporarilyDismissedRadarIds.clear()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            notificationManager?.cancel(NOTIFICATION_ID)
-            stopSelf()
+            stopMonitoring()
             Toast.makeText(applicationContext, "Monitoramento desativado", Toast.LENGTH_SHORT).show()
             return START_NOT_STICKY
         }

@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.jozito.radarlite.InvisibleStartActivity
 import com.jozito.radarlite.data.PreferencesManager
 import com.jozito.radarlite.service.RadarOverlayService
 
@@ -197,9 +198,9 @@ class AutostartReceiver : BroadcastReceiver() {
 
         // 3. Comandos remotos explícitos do Launcher CoolantHUD (atualizam a intenção do usuário - Fase 11)
         if (action == ACTION_START || action == ACTION_START_ALT) {
-            Log.i(TAG, "Comando remoto ACTION_START interceptado ($action). Android SDK_INT: ${Build.VERSION.SDK_INT}")
+            Log.i(TAG, "Comando remoto ACTION_START interceptado ($action).")
 
-            // 1. Atualiza a flag no PreferencesManager (is_service_intentionally_stopped = false)
+            // Atualiza a flag no PreferencesManager (is_service_intentionally_stopped = false)
             prefs.isServiceIntentionallyStopped = false
 
             if (RadarOverlayService.isRunning.value) {
@@ -207,20 +208,22 @@ class AutostartReceiver : BroadcastReceiver() {
                 return
             }
 
-            // 2. Inicia o serviço usando ContextCompat.startForegroundService envolvido em try-catch
+            // Trampoline Activity invisível: Técnica à prova de falhas para contornar restrições de Background Receiver
             try {
-                val canDrawOverlays = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    android.provider.Settings.canDrawOverlays(context)
-                } else {
-                    true
+                val trampolineIntent = Intent(context, InvisibleStartActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
                 }
-                Log.d("RadarLite", "Verificação SYSTEM_ALERT_WINDOW (canDrawOverlays): $canDrawOverlays - Android SDK: ${Build.VERSION.SDK_INT}")
-
-                val serviceIntent = createServiceIntent(context)
-                ContextCompat.startForegroundService(context, serviceIntent)
-                Log.d("RadarLite", "RadarOverlayService iniciado com sucesso a partir de $action via ContextCompat.startForegroundService")
+                context.startActivity(trampolineIntent)
+                Log.d("RadarLite", "InvisibleStartActivity disparada com sucesso a partir de $action")
             } catch (e: Exception) {
-                Log.e("RadarLite", "Start block", e)
+                Log.e("RadarLite", "Start block: Falha ao iniciar InvisibleStartActivity, tentando fallback direto", e)
+                try {
+                    val serviceIntent = createServiceIntent(context)
+                    ContextCompat.startForegroundService(context, serviceIntent)
+                    Log.d("RadarLite", "Fallback direto startForegroundService executado para $action")
+                } catch (e2: Exception) {
+                    Log.e("RadarLite", "Start block: Fallback direto também falhou", e2)
+                }
             }
             return
         }
@@ -317,10 +320,30 @@ class AutostartReceiver : BroadcastReceiver() {
     private fun stopServiceSilently(context: Context, triggerAction: String) {
         Log.i(TAG, "Encerrando RadarOverlayService silenciosamente a partir de $triggerAction...")
         try {
+            PreferencesManager.getInstance(context).isServiceIntentionallyStopped = true
+
+            // 1. Notifica instância ativa em RAM para parada imediata do overlay, sons e GPS
+            RadarOverlayService.activeInstance?.stopMonitoring()
+
+            // 2. Envia a Intent com ACTION_STOP para garantir que onStartCommand seja acionado caso a instância mude
             val stopIntent = Intent(context, RadarOverlayService::class.java).apply {
                 action = RadarOverlayService.ACTION_STOP
             }
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    ContextCompat.startForegroundService(context, stopIntent)
+                } else {
+                    context.startService(stopIntent)
+                }
+            } catch (eStart: Exception) {
+                Log.w(TAG, "Tentativa de enviar ACTION_STOP via startService: ${eStart.message}")
+            }
+
+            // 3. Força interrupção do serviço via Context
             context.stopService(stopIntent)
+
+            // 4. Emite confirmação de estado desligado para sincronização com Launcher
+            RadarOverlayService.broadcastState(context, false)
             Log.d(TAG, "RadarOverlayService encerrado com sucesso a partir de $triggerAction.")
         } catch (e: Exception) {
             Log.e(TAG, "Falha ao encerrar RadarOverlayService a partir de $triggerAction", e)

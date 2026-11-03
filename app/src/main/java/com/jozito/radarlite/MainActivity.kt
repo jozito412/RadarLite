@@ -1749,12 +1749,28 @@ fun RadarLiteApp() {
                         Spacer(modifier = Modifier.height(10.dp))
                     }
 
+                    // Versão 1.2.4
+                    item {
+                        ChangelogVersionCard(
+                            version = "v1.2.4",
+                            buildNumber = "Build 6",
+                            isLatest = true,
+                            date = "Novembro 2026",
+                            items = listOf(
+                                "🚀 Trampoline Activity Invisível: Implementada a InvisibleStartActivity (transparente e sem histórico) acionada pelo AutostartReceiver com FLAG_ACTIVITY_NEW_TASK, contornando qualquer bloqueio de background service em Android 8.0+ a 14+.",
+                                "🛡️ Parâmetros Explícitos de FGS no Android 14: Chamada startForeground() com FOREGROUND_SERVICE_TYPE_SPECIAL_USE | FOREGROUND_SERVICE_TYPE_LOCATION evitando MissingForegroundServiceTypeException.",
+                                "🛑 Parada Imediata e Robusta (ACTION_STOP): Novo método stopMonitoring() que fecha a janela flutuante, interrompe sons e GPS imediatamente sem depender de ciclo de vida postergado do sistema."
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
                     // Versão 1.2.3
                     item {
                         ChangelogVersionCard(
                             version = "v1.2.3",
                             buildNumber = "Build 5",
-                            isLatest = true,
+                            isLatest = false,
                             date = "Novembro 2026",
                             items = listOf(
                                 "🚀 Inicialização Remota Resiliente (Android 8.0+ / 10+): Interceptação otimizada do ACTION_START enviado por Launchers parceiros (ex: CoolantHUD) com ContextCompat.startForegroundService.",
