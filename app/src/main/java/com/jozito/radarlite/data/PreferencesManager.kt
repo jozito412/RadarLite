@@ -87,7 +87,17 @@ class PreferencesManager(context: Context) {
      */
     var isServiceIntentionallyStopped: Boolean
         get() = prefs.getBoolean(KEY_IS_SERVICE_INTENTIONALLY_STOPPED, false)
-        set(value) = prefs.edit().putBoolean(KEY_IS_SERVICE_INTENTIONALLY_STOPPED, value).apply()
+        set(value) {
+            prefs.edit().putBoolean(KEY_IS_SERVICE_INTENTIONALLY_STOPPED, value).commit()
+        }
+
+    /**
+     * Define de forma estritamente síncrona (commit) a intenção de parada do usuário
+     * para evitar condições de corrida com pulsos de Watchdog ou inicialização paralela.
+     */
+    fun setServiceIntentionallyStoppedSync(value: Boolean): Boolean {
+        return prefs.edit().putBoolean(KEY_IS_SERVICE_INTENTIONALLY_STOPPED, value).commit()
+    }
 
     /**
      * Endereço MAC do dispositivo Bluetooth veicular configurado (ex: "AA:BB:CC:DD:EE:FF").

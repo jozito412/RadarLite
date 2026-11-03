@@ -1749,12 +1749,28 @@ fun RadarLiteApp() {
                         Spacer(modifier = Modifier.height(10.dp))
                     }
 
+                    // Versão 1.2.5
+                    item {
+                        ChangelogVersionCard(
+                            version = "v1.2.5",
+                            buildNumber = "Build 7",
+                            isLatest = true,
+                            date = "Novembro 2026",
+                            items = listOf(
+                                "🔒 Trava Síncrona do Cão de Guarda: Gravação atômica e síncrona (commit) de is_service_intentionally_stopped = true no momento exato do ACTION_STOP, bloqueando pulsos concorrentes de ACTION_WATCHDOG_WAKE.",
+                                "⚡ Contrato do OS Imediato: Chamada startForeground() movida para a primeira linha absoluta do onCreate(), cumprindo a exigência do Android instantaneamente sem depender de I/O de disco ou Room.",
+                                "🛑 Encerramento Seguro: Execução imediata de stopForeground(STOP_FOREGROUND_REMOVE) seguido de stopSelf() em stopMonitoring(), eliminando condições de corrida ao desligar o serviço."
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
                     // Versão 1.2.4
                     item {
                         ChangelogVersionCard(
                             version = "v1.2.4",
                             buildNumber = "Build 6",
-                            isLatest = true,
+                            isLatest = false,
                             date = "Novembro 2026",
                             items = listOf(
                                 "🚀 Trampoline Activity Invisível: Implementada a InvisibleStartActivity (transparente e sem histórico) acionada pelo AutostartReceiver com FLAG_ACTIVITY_NEW_TASK, contornando qualquer bloqueio de background service em Android 8.0+ a 14+.",

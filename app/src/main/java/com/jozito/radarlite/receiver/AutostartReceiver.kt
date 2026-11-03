@@ -228,7 +228,14 @@ class AutostartReceiver : BroadcastReceiver() {
             return
         }
         if (action == ACTION_STOP || action == ACTION_STOP_ALT) {
-            prefs.isServiceIntentionallyStopped = true
+            Log.i(TAG, "Comando remoto ACTION_STOP interceptado ($action).")
+
+            // Tarefa 1: Travar o Cão de Guarda - Salva a intenção de parada de forma estritamente síncrona
+            prefs.setServiceIntentionallyStoppedSync(true)
+
+            // Só DEPOIS de salvar essa intenção, chama o stopMonitoring() na instância ativa
+            RadarOverlayService.activeInstance?.stopMonitoring()
+
             stopServiceSilently(context, action)
             return
         }
@@ -320,26 +327,16 @@ class AutostartReceiver : BroadcastReceiver() {
     private fun stopServiceSilently(context: Context, triggerAction: String) {
         Log.i(TAG, "Encerrando RadarOverlayService silenciosamente a partir de $triggerAction...")
         try {
-            PreferencesManager.getInstance(context).isServiceIntentionallyStopped = true
+            // 1. Garante a intenção salva de forma síncrona
+            PreferencesManager.getInstance(context).setServiceIntentionallyStoppedSync(true)
 
-            // 1. Notifica instância ativa em RAM para parada imediata do overlay, sons e GPS
+            // 2. Notifica instância ativa em RAM para parada imediata do overlay, sons e GPS
             RadarOverlayService.activeInstance?.stopMonitoring()
 
-            // 2. Envia a Intent com ACTION_STOP para garantir que onStartCommand seja acionado caso a instância mude
+            // 3. Força interrupção do serviço via Context.stopService (NUNCA chamar startForegroundService para parar)
             val stopIntent = Intent(context, RadarOverlayService::class.java).apply {
                 action = RadarOverlayService.ACTION_STOP
             }
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    ContextCompat.startForegroundService(context, stopIntent)
-                } else {
-                    context.startService(stopIntent)
-                }
-            } catch (eStart: Exception) {
-                Log.w(TAG, "Tentativa de enviar ACTION_STOP via startService: ${eStart.message}")
-            }
-
-            // 3. Força interrupção do serviço via Context
             context.stopService(stopIntent)
 
             // 4. Emite confirmação de estado desligado para sincronização com Launcher

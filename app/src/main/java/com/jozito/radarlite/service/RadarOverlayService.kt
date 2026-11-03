@@ -416,19 +416,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
          * Para o serviço de rastreamento e registra o estado de parada intencional do usuário (Fase 11).
          */
         fun stop(context: Context) {
-            PreferencesManager.getInstance(context).isServiceIntentionallyStopped = true
+            PreferencesManager.getInstance(context).setServiceIntentionallyStoppedSync(true)
             activeInstance?.stopMonitoring()
             val intent = Intent(context, RadarOverlayService::class.java).apply {
                 action = ACTION_STOP
-            }
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    ContextCompat.startForegroundService(context, intent)
-                } else {
-                    context.startService(intent)
-                }
-            } catch (e: Exception) {
-                context.stopService(intent)
             }
             context.stopService(intent)
             broadcastState(context, false)
@@ -928,21 +919,23 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "Iniciando RadarOverlayService")
 
+        // Tarefa 2: Cumprir o contrato do OS imediatamente como primeira linha absoluta
+        createNotificationChannel()
+        startAsForegroundService()
+
+        Log.d(TAG, "Iniciando RadarOverlayService")
+        activeInstance = this
         savedStateRegistryController.performRestore(null)
 
+        preferencesManager = PreferencesManager.getInstance(applicationContext)
         radarDao = RadarDatabase.getDatabase(applicationContext).radarDao()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        preferencesManager = PreferencesManager.getInstance(applicationContext)
-        activeInstance = this
         _isNightMode.value = preferencesManager.isNightModeEnabled
         _isHudMode.value = preferencesManager.isHudModeEnabled
         _isCenterBigCard.value = preferencesManager.useCenterBigCard
 
         initSoundPool()
-        createNotificationChannel()
-        startAsForegroundService()
         setupLocationCallback()
         setupOverlayWindow()
 
@@ -952,10 +945,12 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
     /**
      * Encerra imediatamente o rastreamento, remove a janela flutuante, cancela a notificação e desliga o serviço.
+     * Tarefa 3: Encerramento Seguro chamando stopForeground(STOP_FOREGROUND_REMOVE) seguido imediatamente de stopSelf().
      */
     fun stopMonitoring() {
+        Log.i(TAG, "stopMonitoring() acionado: encerrando Foreground Service com segurança...")
         _isRunning.value = false
-        preferencesManager.isServiceIntentionallyStopped = true
+        preferencesManager.setServiceIntentionallyStoppedSync(true)
         broadcastState(applicationContext, false)
         _isGpsLost.value = false
         _closestRadarAlertDistance.value = PreferencesManager.DEFAULT_DIST_HIGHWAY.toFloat()
@@ -963,9 +958,12 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         stopLocationUpdates()
         removeOverlayWindow()
         temporarilyDismissedRadarIds.clear()
-        stopForeground(STOP_FOREGROUND_REMOVE)
+
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
         notificationManager?.cancel(NOTIFICATION_ID)
+
+        // Tarefa 3: stopForeground(STOP_FOREGROUND_REMOVE) seguido imediatamente de stopSelf()
+        stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 

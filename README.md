@@ -2,13 +2,13 @@
   <img src="./RadarLite_icon.png" width="128" height="128" alt="RadarLite Icon" />
 </p>
 
-# 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.2.4)
+# 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.2.5)
 
 [![Android](https://img.shields.io/badge/Android-8.0%2B%20(API%2026%2B)-3DDC84?logo=android&logoColor=white)](#)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-7F52FF?logo=kotlin&logoColor=white)](#)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white)](#)
 [![Room](https://img.shields.io/badge/Room-SQLite%20Offline-FF6F00)](#)
-[![Versão](https://img.shields.io/badge/Versão-1.2.4-brightgreen)](#)
+[![Versão](https://img.shields.io/badge/Versão-1.2.5-brightgreen)](#)
 
 **RadarLite** é um aplicativo Android veicular de alta performance, leve, 100% offline e com interface moderna em **Jetpack Compose**. Projetado especificamente para motoristas e centrais multimídia automotivas, ele funciona como uma camada flutuante inteligente (*overlay*) sobre o Waze, Google Maps ou qualquer outro app de navegação.
 
@@ -16,7 +16,7 @@
 
 ## 📦 Download do Instalador
 
-Você pode baixar diretamente o instalador compilado da versão mais recente (**v1.2.4 - Build 6**):
+Você pode baixar diretamente o instalador compilado da versão mais recente (**v1.2.5 - Build 7**):
 - 📲 **[RadarLite.apk](./RadarLite.apk)** (Instalador oficial pronto para Android)
 
 ---
@@ -150,6 +150,11 @@ cd RadarLite
 ---
 
 ## 📜 Histórico de Versões (Changelog)
+
+### [v1.2.5 (Build 7)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.5) — *Novembro 2026*
+- 🔒 **Trava Síncrona do Cão de Guarda:** Gravação imediata e síncrona (`commit`) de `is_service_intentionally_stopped = true` antes de qualquer ação de parada, eliminando a condição de corrida com pulsos de `ACTION_WATCHDOG_WAKE`.
+- ⚡ **Cumprimento Imediato do Contrato do OS:** Chamada de `startForeground()` movida para ser a primeira instrução executada no `onCreate()`, assegurando inicialização instantânea sem atrasos de I/O de disco.
+- 🛑 **Encerramento Seguro:** Chamada direta a `stopForeground(STOP_FOREGROUND_REMOVE)` seguida de `stopSelf()` na rotina `stopMonitoring()`.
 
 ### [v1.2.4 (Build 6)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.4) — *Novembro 2026*
 - 🚀 **Trampoline Activity Invisível (`InvisibleStartActivity`):** Contorna definitivamente o bloqueio do Android 8.0+ a 14+ em disparos de serviços vindos de BroadcastReceivers em background, iniciando o serviço através de uma Activity transparente de ciclo instantâneo com `FLAG_ACTIVITY_NEW_TASK`.
