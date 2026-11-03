@@ -62,10 +62,14 @@
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
                 <!-- Ações para controle remoto e sincronização de via dupla (Two-Way Sync) via Launchers / CoolantHUD -->
                 <action android:name="com.jozito412.radarlite.ACTION_START" />
+                <action android:name="com.jozito.radarlite.ACTION_START" />
                 <action android:name="com.jozito412.radarlite.ACTION_STOP" />
+                <action android:name="com.jozito.radarlite.ACTION_STOP" />
                 <action android:name="com.jozito412.radarlite.ACTION_REQUEST_STATE" />
+                <action android:name="com.jozito.radarlite.ACTION_REQUEST_STATE" />
                 <!-- Pulso de vida (Watchdog) para acordar o serviço após Deep Sleep / tela acesa -->
                 <action android:name="com.jozito412.radarlite.ACTION_WATCHDOG_WAKE" />
+                <action android:name="com.jozito.radarlite.ACTION_WATCHDOG_WAKE" />
             </intent-filter>
         </receiver>
 

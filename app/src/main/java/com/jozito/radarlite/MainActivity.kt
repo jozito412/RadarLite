@@ -1749,12 +1749,29 @@ fun RadarLiteApp() {
                         Spacer(modifier = Modifier.height(10.dp))
                     }
 
+                    // Versão 1.2.3
+                    item {
+                        ChangelogVersionCard(
+                            version = "v1.2.3",
+                            buildNumber = "Build 5",
+                            isLatest = true,
+                            date = "Novembro 2026",
+                            items = listOf(
+                                "🚀 Inicialização Remota Resiliente (Android 8.0+ / 10+): Interceptação otimizada do ACTION_START enviado por Launchers parceiros (ex: CoolantHUD) com ContextCompat.startForegroundService.",
+                                "🔑 Sincronização de Intenção do Usuário: Atualização atômica de is_service_intentionally_stopped = false antes da inicialização para garantir persistência.",
+                                "🛡️ Bypass Nativo SYSTEM_ALERT_WINDOW: Validação de diagnóstico e proteção contra BackgroundServiceStartNotAllowedException.",
+                                "📡 Compatibilidade Dupla de Intents: Reconhecimento simultâneo de actions com namespaces com.jozito412 e com.jozito no AndroidManifest."
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
                     // Versão 1.2.2
                     item {
                         ChangelogVersionCard(
                             version = "v1.2.2",
                             buildNumber = "Build 4",
-                            isLatest = true,
+                            isLatest = false,
                             date = "Novembro 2026",
                             items = listOf(
                                 "📐 Padronização Visual dos Cards: Os cards do modo normal e do alerta estático agora têm exatamente o mesmo tamanho e proporções do card agressivo, eliminando qualquer salto visual na tela.",

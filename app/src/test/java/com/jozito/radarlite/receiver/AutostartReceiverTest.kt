@@ -38,10 +38,15 @@ class AutostartReceiverTest {
 
         // Controle remoto por Launcher customizado (ex: CoolantHUD)
         assertEquals("com.jozito412.radarlite.ACTION_START", AutostartReceiver.ACTION_START)
+        assertEquals("com.jozito.radarlite.ACTION_START", AutostartReceiver.ACTION_START_ALT)
         assertEquals("com.jozito412.radarlite.ACTION_REQUEST_STATE", AutostartReceiver.ACTION_REQUEST_STATE)
+        assertEquals("com.jozito.radarlite.ACTION_REQUEST_STATE", AutostartReceiver.ACTION_REQUEST_STATE_ALT)
         assertEquals("com.jozito412.radarlite.ACTION_WATCHDOG_WAKE", AutostartReceiver.ACTION_WATCHDOG_WAKE)
+        assertEquals("com.jozito.radarlite.ACTION_WATCHDOG_WAKE", AutostartReceiver.ACTION_WATCHDOG_WAKE_ALT)
         assertTrue(AutostartReceiver.isAutostartAction(AutostartReceiver.ACTION_START))
+        assertTrue(AutostartReceiver.isAutostartAction(AutostartReceiver.ACTION_START_ALT))
         assertTrue(AutostartReceiver.isAutostartAction(AutostartReceiver.ACTION_WATCHDOG_WAKE))
+        assertTrue(AutostartReceiver.isAutostartAction(AutostartReceiver.ACTION_WATCHDOG_WAKE_ALT))
     }
 
     @Test
@@ -68,7 +73,9 @@ class AutostartReceiverTest {
 
         // Controle remoto por Launcher customizado (ex: CoolantHUD)
         assertEquals("com.jozito412.radarlite.ACTION_STOP", AutostartReceiver.ACTION_STOP)
+        assertEquals("com.jozito.radarlite.ACTION_STOP", AutostartReceiver.ACTION_STOP_ALT)
         assertTrue(AutostartReceiver.isAutostopAction(AutostartReceiver.ACTION_STOP))
+        assertTrue(AutostartReceiver.isAutostopAction(AutostartReceiver.ACTION_STOP_ALT))
 
         // Outras ações não devem acionar auto-stop
         assertFalse(AutostartReceiver.isAutostopAction(BluetoothDevice.ACTION_ACL_CONNECTED))
@@ -82,18 +89,23 @@ class AutostartReceiverTest {
         assertTrue(AutostartReceiver.shouldStartService(BluetoothDevice.ACTION_ACL_CONNECTED, isServiceRunning = false))
         assertTrue(AutostartReceiver.shouldStartService(Intent.ACTION_BOOT_COMPLETED, isServiceRunning = false))
         assertTrue(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_START, isServiceRunning = false))
+        assertTrue(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_START_ALT, isServiceRunning = false))
         assertTrue(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_WATCHDOG_WAKE, isServiceRunning = false))
+        assertTrue(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_WATCHDOG_WAKE_ALT, isServiceRunning = false))
 
         // Trava lógica: Se o serviço JÁ ESTÁ RODANDO (ex: múltiplos disparos simultâneos ou launcher re-enviando comando),
         // o receptor descarta novos disparos para evitar concorrência e exceções
         assertFalse(AutostartReceiver.shouldStartService(BluetoothDevice.ACTION_ACL_CONNECTED, isServiceRunning = true))
         assertFalse(AutostartReceiver.shouldStartService(Intent.ACTION_BOOT_COMPLETED, isServiceRunning = true))
         assertFalse(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_START, isServiceRunning = true))
+        assertFalse(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_START_ALT, isServiceRunning = true))
         assertFalse(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_WATCHDOG_WAKE, isServiceRunning = true))
+        assertFalse(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_WATCHDOG_WAKE_ALT, isServiceRunning = true))
 
         // Ações inválidas não devem iniciar mesmo se o serviço estiver parado
         assertFalse(AutostartReceiver.shouldStartService(BluetoothDevice.ACTION_ACL_DISCONNECTED, isServiceRunning = false))
         assertFalse(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_STOP, isServiceRunning = false))
+        assertFalse(AutostartReceiver.shouldStartService(AutostartReceiver.ACTION_STOP_ALT, isServiceRunning = false))
         assertFalse(AutostartReceiver.shouldStartService(null, isServiceRunning = false))
     }
 

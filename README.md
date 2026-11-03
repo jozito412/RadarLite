@@ -2,13 +2,13 @@
   <img src="./RadarLite_icon.png" width="128" height="128" alt="RadarLite Icon" />
 </p>
 
-# 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.2.2)
+# 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.2.3)
 
 [![Android](https://img.shields.io/badge/Android-8.0%2B%20(API%2026%2B)-3DDC84?logo=android&logoColor=white)](#)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-7F52FF?logo=kotlin&logoColor=white)](#)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white)](#)
 [![Room](https://img.shields.io/badge/Room-SQLite%20Offline-FF6F00)](#)
-[![Versão](https://img.shields.io/badge/Versão-1.2.2-brightgreen)](#)
+[![Versão](https://img.shields.io/badge/Versão-1.2.3-brightgreen)](#)
 
 **RadarLite** é um aplicativo Android veicular de alta performance, leve, 100% offline e com interface moderna em **Jetpack Compose**. Projetado especificamente para motoristas e centrais multimídia automotivas, ele funciona como uma camada flutuante inteligente (*overlay*) sobre o Waze, Google Maps ou qualquer outro app de navegação.
 
@@ -16,7 +16,7 @@
 
 ## 📦 Download do Instalador
 
-Você pode baixar diretamente o instalador compilado da versão mais recente (**v1.2.2 - Build 4**):
+Você pode baixar diretamente o instalador compilado da versão mais recente (**v1.2.3 - Build 5**):
 - 📲 **[RadarLite.apk](./RadarLite.apk)** (Instalador oficial pronto para Android)
 
 ---
@@ -150,6 +150,12 @@ cd RadarLite
 ---
 
 ## 📜 Histórico de Versões (Changelog)
+
+### [v1.2.3 (Build 5)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.3) — *Novembro 2026*
+- 🚀 **Inicialização Remota Resiliente (Android 8.0+ / 10+):** Interceptação otimizada do `ACTION_START` recebido de Launchers parceiros (ex: CoolantHUD) com `ContextCompat.startForegroundService`.
+- 🔑 **Sincronização de Intenção do Usuário:** Atualização imediata de `is_service_intentionally_stopped = false` antes de subir o serviço para respeitar a vontade do motorista.
+- 🛡️ **Bypass Nativo SYSTEM_ALERT_WINDOW:** Validação diagnóstica da permissão de sobreposição para inicialização desimpedida em segundo plano sem `BackgroundServiceStartNotAllowedException`.
+- 📡 **Compatibilidade Ampla de Namespaces:** Reconhecimento simultâneo no `AndroidManifest.xml` de intents com namespaces `com.jozito412` e `com.jozito`.
 
 ### [v1.2.2 (Build 4)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.2) — *Novembro 2026*
 - 📐 **Padronização de Tamanho dos Cards:** Cards do modo normal e do alerta estático unificados com as mesmas dimensões e proporções do card agressivo, eliminando mudanças abruptas de tamanho na tela.

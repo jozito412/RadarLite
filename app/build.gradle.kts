@@ -14,8 +14,8 @@ android {
         applicationId = "com.jozito.radarlite"
         minSdk = 26
         targetSdk = 37
-        versionCode = 4
-        versionName = "1.2.2"
+        versionCode = 5
+        versionName = "1.2.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

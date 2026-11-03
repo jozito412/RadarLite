@@ -24,9 +24,13 @@ class AutostartReceiver : BroadcastReceiver() {
 
         // Ações customizadas para controle remoto por launchers ou apps externos (ex: CoolantHUD)
         const val ACTION_START = "com.jozito412.radarlite.ACTION_START"
+        const val ACTION_START_ALT = "com.jozito.radarlite.ACTION_START"
         const val ACTION_STOP = "com.jozito412.radarlite.ACTION_STOP"
+        const val ACTION_STOP_ALT = "com.jozito.radarlite.ACTION_STOP"
         const val ACTION_REQUEST_STATE = "com.jozito412.radarlite.ACTION_REQUEST_STATE"
+        const val ACTION_REQUEST_STATE_ALT = "com.jozito.radarlite.ACTION_REQUEST_STATE"
         const val ACTION_WATCHDOG_WAKE = "com.jozito412.radarlite.ACTION_WATCHDOG_WAKE"
+        const val ACTION_WATCHDOG_WAKE_ALT = "com.jozito.radarlite.ACTION_WATCHDOG_WAKE"
         const val ACTION_CUSTOM_START = ACTION_START
         const val ACTION_CUSTOM_STOP = ACTION_STOP
 
@@ -66,7 +70,9 @@ class AutostartReceiver : BroadcastReceiver() {
             return isIgnitionOrBootAction(action) ||
                     action == BluetoothDevice.ACTION_ACL_CONNECTED ||
                     action == ACTION_START ||
-                    action == ACTION_WATCHDOG_WAKE
+                    action == ACTION_START_ALT ||
+                    action == ACTION_WATCHDOG_WAKE ||
+                    action == ACTION_WATCHDOG_WAKE_ALT
         }
 
         /**
@@ -122,7 +128,8 @@ class AutostartReceiver : BroadcastReceiver() {
          */
         fun isAutostopAction(action: String?): Boolean {
             return action == BluetoothDevice.ACTION_ACL_DISCONNECTED ||
-                    action == ACTION_STOP
+                    action == ACTION_STOP ||
+                    action == ACTION_STOP_ALT
         }
 
         /**
@@ -168,7 +175,7 @@ class AutostartReceiver : BroadcastReceiver() {
         Log.d(TAG, "Broadcast recebido: $action")
 
         // 1. Solicitação remota de status (Ping) por Launcher customizado (ex: CoolantHUD)
-        if (action == ACTION_REQUEST_STATE) {
+        if (action == ACTION_REQUEST_STATE || action == ACTION_REQUEST_STATE_ALT) {
             val currentState = RadarOverlayService.isRunning.value
             RadarOverlayService.broadcastState(context, currentState)
             Log.d(TAG, "Solicitação de status ACTION_REQUEST_STATE atendida: is_running=$currentState.")
@@ -178,7 +185,7 @@ class AutostartReceiver : BroadcastReceiver() {
         val prefs = PreferencesManager.getInstance(context)
 
         // 2. Pulso de vida (Watchdog) enviado pelo Launcher (CoolantHUD) ao acender a tela após Deep Sleep
-        if (action == ACTION_WATCHDOG_WAKE) {
+        if (action == ACTION_WATCHDOG_WAKE || action == ACTION_WATCHDOG_WAKE_ALT) {
             if (prefs.isServiceIntentionallyStopped) {
                 Log.d(TAG, "Pulso Watchdog recebido ($action), porém o serviço foi desligado intencionalmente pelo usuário (is_service_intentionally_stopped = true). Ignorando.")
                 return
@@ -189,12 +196,42 @@ class AutostartReceiver : BroadcastReceiver() {
         }
 
         // 3. Comandos remotos explícitos do Launcher CoolantHUD (atualizam a intenção do usuário - Fase 11)
-        if (action == ACTION_START) {
+        if (action == ACTION_START || action == ACTION_START_ALT) {
+            Log.i(TAG, "Comando remoto ACTION_START interceptado ($action). Android SDK_INT: ${Build.VERSION.SDK_INT}")
+
+            // 1. Atualiza a chave de intenção no PreferencesManager para 'desejado ativo'
             prefs.isServiceIntentionallyStopped = false
-            startServiceSilently(context, action)
+
+            if (RadarOverlayService.isRunning.value) {
+                Log.d(TAG, "RadarOverlayService já está em execução. Ignorando chamada duplicada de $action.")
+                return
+            }
+
+            // Validação de diagnóstico da permissão SYSTEM_ALERT_WINDOW (Bypass nativo do Android 10+)
+            val canDrawOverlays = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                android.provider.Settings.canDrawOverlays(context)
+            } else {
+                true
+            }
+            Log.d(TAG, "Diagnóstico SYSTEM_ALERT_WINDOW (canDrawOverlays): $canDrawOverlays")
+
+            // 2. Inicia o RadarOverlayService utilizando ContextCompat.startForegroundService envolvido em try-catch
+            val serviceIntent = createServiceIntent(context)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    Log.i(TAG, "Iniciando RadarOverlayService via ContextCompat.startForegroundService (Android O+ / API ${Build.VERSION.SDK_INT})...")
+                    ContextCompat.startForegroundService(context, serviceIntent)
+                } else {
+                    Log.i(TAG, "Iniciando RadarOverlayService via context.startService (Legacy Android / API ${Build.VERSION.SDK_INT})...")
+                    context.startService(serviceIntent)
+                }
+                Log.d(TAG, "RadarOverlayService iniciado com sucesso a partir de $action.")
+            } catch (e: Exception) {
+                Log.e(TAG, "Falha ao iniciar RadarOverlayService remotamente a partir de $action (canDrawOverlays=$canDrawOverlays, SDK=${Build.VERSION.SDK_INT})", e)
+            }
             return
         }
-        if (action == ACTION_STOP) {
+        if (action == ACTION_STOP || action == ACTION_STOP_ALT) {
             prefs.isServiceIntentionallyStopped = true
             stopServiceSilently(context, action)
             return
@@ -269,10 +306,14 @@ class AutostartReceiver : BroadcastReceiver() {
                 return
             }
 
-            Log.i(TAG, "Inicializando RadarOverlayService silenciosamente a partir de $triggerAction...")
+            Log.i(TAG, "Inicializando RadarOverlayService silenciosamente a partir de $triggerAction (SDK: ${Build.VERSION.SDK_INT})...")
             val serviceIntent = createServiceIntent(context)
             try {
-                ContextCompat.startForegroundService(context, serviceIntent)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    ContextCompat.startForegroundService(context, serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
                 Log.d(TAG, "RadarOverlayService iniciado com sucesso a partir de $triggerAction.")
             } catch (e: Exception) {
                 Log.e(TAG, "Falha ao iniciar RadarOverlayService a partir de $triggerAction", e)
