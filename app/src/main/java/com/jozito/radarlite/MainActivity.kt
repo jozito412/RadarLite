@@ -1749,12 +1749,28 @@ fun RadarLiteApp() {
                         Spacer(modifier = Modifier.height(10.dp))
                     }
 
+                    // Versão 1.2.6
+                    item {
+                        ChangelogVersionCard(
+                            version = "v1.2.6",
+                            buildNumber = "Build 8",
+                            isLatest = true,
+                            date = "Novembro 2026",
+                            items = listOf(
+                                "⚡ Rota Expressa de Devolução (Foreground Broadcast): Emissão de ACTION_STATE_CHANGED com FLAG_RECEIVER_FOREGROUND e FLAG_INCLUDE_STOPPED_PACKAGES, contornando o descarte em segundo plano pelo SO da multimídia.",
+                                "📡 Sincronização em Tempo Real com Launcher: Confirmação imediata do status is_running em resposta a pings remotos (ACTION_REQUEST_STATE) e durante o ciclo de vida do serviço.",
+                                "🔄 Compatibilidade Dupla de Namespaces: Transmissão simultânea de broadcasts de estado nos namespaces com.jozito412 e com.jozito."
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
                     // Versão 1.2.5
                     item {
                         ChangelogVersionCard(
                             version = "v1.2.5",
                             buildNumber = "Build 7",
-                            isLatest = true,
+                            isLatest = false,
                             date = "Novembro 2026",
                             items = listOf(
                                 "🔒 Trava Síncrona do Cão de Guarda: Gravação atômica e síncrona (commit) de is_service_intentionally_stopped = true no momento exato do ACTION_STOP, bloqueando pulsos concorrentes de ACTION_WATCHDOG_WAKE.",

@@ -32,6 +32,9 @@ class AutostartReceiver : BroadcastReceiver() {
         const val ACTION_REQUEST_STATE_ALT = "com.jozito.radarlite.ACTION_REQUEST_STATE"
         const val ACTION_WATCHDOG_WAKE = "com.jozito412.radarlite.ACTION_WATCHDOG_WAKE"
         const val ACTION_WATCHDOG_WAKE_ALT = "com.jozito.radarlite.ACTION_WATCHDOG_WAKE"
+        const val ACTION_STATE_CHANGED = RadarOverlayService.ACTION_STATE_CHANGED
+        const val ACTION_STATE_CHANGED_ALT = RadarOverlayService.ACTION_STATE_CHANGED_ALT
+        const val EXTRA_IS_RUNNING = RadarOverlayService.EXTRA_IS_RUNNING
         const val ACTION_CUSTOM_START = ACTION_START
         const val ACTION_CUSTOM_STOP = ACTION_STOP
 
@@ -179,7 +182,7 @@ class AutostartReceiver : BroadcastReceiver() {
         if (action == ACTION_REQUEST_STATE || action == ACTION_REQUEST_STATE_ALT) {
             val currentState = RadarOverlayService.isRunning.value
             RadarOverlayService.broadcastState(context, currentState)
-            Log.d(TAG, "Solicitação de status ACTION_REQUEST_STATE atendida: is_running=$currentState.")
+            Log.d(TAG, "Solicitação de status ACTION_REQUEST_STATE atendida com rota expressa (Foreground Broadcast): is_running=$currentState.")
             return
         }
 

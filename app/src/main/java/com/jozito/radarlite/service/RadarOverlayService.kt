@@ -287,19 +287,31 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
         // Ações e extras para transmissão de estado para Launchers parceiros (ex: CoolantHUD)
         const val ACTION_STATE_CHANGED = "com.jozito412.radarlite.ACTION_STATE_CHANGED"
+        const val ACTION_STATE_CHANGED_ALT = "com.jozito.radarlite.ACTION_STATE_CHANGED"
         const val EXTRA_IS_RUNNING = "is_running"
 
         /**
          * Emite um Broadcast anunciando a mudança de estado de execução do serviço.
          * Usado para sincronização de via dupla com Launchers externos (ex: CoolantHUD).
+         * Utiliza FLAG_INCLUDE_STOPPED_PACKAGES e FLAG_RECEIVER_FOREGROUND (Foreground Broadcast)
+         * para forçar o sistema operacional da multimídia a não reter o broadcast em filas de baixa energia.
          */
         fun broadcastState(context: Context, isRunning: Boolean) {
             try {
                 val intent = Intent(ACTION_STATE_CHANGED).apply {
                     putExtra(EXTRA_IS_RUNNING, isRunning)
+                    addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES or Intent.FLAG_RECEIVER_FOREGROUND)
                 }
                 context.sendBroadcast(intent)
-                Log.d(TAG, "Broadcast de estado emitido: $ACTION_STATE_CHANGED ($EXTRA_IS_RUNNING = $isRunning)")
+
+                // Emissão com namespace alternativo para compatibilidade total
+                val intentAlt = Intent(ACTION_STATE_CHANGED_ALT).apply {
+                    putExtra(EXTRA_IS_RUNNING, isRunning)
+                    addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES or Intent.FLAG_RECEIVER_FOREGROUND)
+                }
+                context.sendBroadcast(intentAlt)
+
+                Log.d(TAG, "Broadcast de estado emitido (Foreground Priority): $ACTION_STATE_CHANGED ($EXTRA_IS_RUNNING = $isRunning)")
             } catch (e: Exception) {
                 Log.e(TAG, "Erro ao emitir broadcast de estado", e)
             }

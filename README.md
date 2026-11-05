@@ -2,13 +2,13 @@
   <img src="./RadarLite_icon.png" width="128" height="128" alt="RadarLite Icon" />
 </p>
 
-# 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.2.5)
+# 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.2.6)
 
 [![Android](https://img.shields.io/badge/Android-8.0%2B%20(API%2026%2B)-3DDC84?logo=android&logoColor=white)](#)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-7F52FF?logo=kotlin&logoColor=white)](#)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white)](#)
 [![Room](https://img.shields.io/badge/Room-SQLite%20Offline-FF6F00)](#)
-[![Versão](https://img.shields.io/badge/Versão-1.2.5-brightgreen)](#)
+[![Versão](https://img.shields.io/badge/Versão-1.2.6-brightgreen)](#)
 
 **RadarLite** é um aplicativo Android veicular de alta performance, leve, 100% offline e com interface moderna em **Jetpack Compose**. Projetado especificamente para motoristas e centrais multimídia automotivas, ele funciona como uma camada flutuante inteligente (*overlay*) sobre o Waze, Google Maps ou qualquer outro app de navegação.
 
@@ -16,7 +16,7 @@
 
 ## 📦 Download do Instalador
 
-Você pode baixar diretamente o instalador compilado da versão mais recente (**v1.2.5 - Build 7**):
+Você pode baixar diretamente o instalador compilado da versão mais recente (**v1.2.6 - Build 8**):
 - 📲 **[RadarLite.apk](./RadarLite.apk)** (Instalador oficial pronto para Android)
 
 ---
@@ -150,6 +150,11 @@ cd RadarLite
 ---
 
 ## 📜 Histórico de Versões (Changelog)
+
+### [v1.2.6 (Build 8)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.6) — *Novembro 2026*
+- ⚡ **Rota Expressa de Devolução (Foreground Broadcast):** Emissão de `ACTION_STATE_CHANGED` com `FLAG_RECEIVER_FOREGROUND` e `FLAG_INCLUDE_STOPPED_PACKAGES`, impedindo que o SO da multimídia retenha ou descarte a confirmação de estado em filas de baixa energia.
+- 📡 **Sincronização em Tempo Real com Launcher:** Resposta imediata a pings remotos (`ACTION_REQUEST_STATE`) e durante transições de ciclo de vida (`onCreate`, `onStartCommand`, `stopMonitoring`, `onDestroy`).
+- 🔄 **Compatibilidade Dupla de Namespaces:** Transmissão de broadcast de estado simultânea nos namespaces `com.jozito412` e `com.jozito`.
 
 ### [v1.2.5 (Build 7)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.5) — *Novembro 2026*
 - 🔒 **Trava Síncrona do Cão de Guarda:** Gravação imediata e síncrona (`commit`) de `is_service_intentionally_stopped = true` antes de qualquer ação de parada, eliminando a condição de corrida com pulsos de `ACTION_WATCHDOG_WAKE`.
