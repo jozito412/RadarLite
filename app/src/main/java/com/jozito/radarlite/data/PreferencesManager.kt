@@ -2,6 +2,7 @@ package com.jozito.radarlite.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.appcompat.app.AppCompatDelegate
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -30,13 +31,44 @@ class PreferencesManager(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_IS_SOUND_ENABLED, value).apply()
 
     /**
+     * Preferência unificada de tema para toda a aplicação (Auto / Dia / Noite).
+     * Controla tanto a tela principal/menus quanto os cards flutuantes.
+     */
+    var themePreference: String
+        get() {
+            val pref = prefs.getString(KEY_THEME_PREFERENCE, null)
+            if (pref != null) return pref
+            return if (prefs.getBoolean(KEY_IS_NIGHT_MODE_ENABLED, false)) THEME_NIGHT else THEME_AUTO
+        }
+        set(value) {
+            prefs.edit()
+                .putString(KEY_THEME_PREFERENCE, value)
+                .putBoolean(KEY_IS_NIGHT_MODE_ENABLED, value == THEME_NIGHT)
+                .apply()
+            applyAppTheme(value)
+        }
+
+    /**
+     * Aplica dinamicamente o tema no AppCompatDelegate para que todo o app respeite a escolha.
+     */
+    fun applyAppTheme(theme: String = themePreference) {
+        val mode = when (theme.lowercase()) {
+            THEME_DAY -> AppCompatDelegate.MODE_NIGHT_NO
+            THEME_NIGHT -> AppCompatDelegate.MODE_NIGHT_YES
+            else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+        }
+        AppCompatDelegate.setDefaultNightMode(mode)
+    }
+
+    /**
      * Define se o Modo Noturno (fundo escuro de alto contraste, visão direta) está ativado.
-     * Quando true, aplica fundo preto (#000000) e alto contraste para não ofuscar à noite,
-     * mantendo a visualização normal direta (sem espelhar a tela).
+     * Mantido para total compatibilidade retroativa com código existente.
      */
     var isNightModeEnabled: Boolean
-        get() = prefs.getBoolean(KEY_IS_NIGHT_MODE_ENABLED, false)
-        set(value) = prefs.edit().putBoolean(KEY_IS_NIGHT_MODE_ENABLED, value).apply()
+        get() = themePreference == THEME_NIGHT
+        set(value) {
+            themePreference = if (value) THEME_NIGHT else THEME_DAY
+        }
 
     /**
      * Define se o Modo HUD (Head-Up Display: espelhamento para para-brisa) está ativado.
@@ -370,8 +402,41 @@ class PreferencesManager(context: Context) {
             .apply()
     }
 
+    /**
+     * Conjunto de IDs de radares marcados para revisão / correção de base de dados pelo usuário.
+     */
+    val flaggedForReview: Set<String>
+        get() = prefs.getStringSet(KEY_FLAGGED_FOR_REVIEW, emptySet()) ?: emptySet()
+
+    fun flagRadarForReview(radarId: Long): Boolean {
+        val current = flaggedForReview.toMutableSet()
+        val added = current.add(radarId.toString())
+        if (added) {
+            prefs.edit().putStringSet(KEY_FLAGGED_FOR_REVIEW, current).apply()
+        }
+        return added
+    }
+
+    fun unflagRadarForReview(radarId: Long) {
+        val current = flaggedForReview.toMutableSet()
+        if (current.remove(radarId.toString())) {
+            prefs.edit().putStringSet(KEY_FLAGGED_FOR_REVIEW, current).apply()
+        }
+    }
+
+    fun clearFlaggedRadars() {
+        prefs.edit().remove(KEY_FLAGGED_FOR_REVIEW).apply()
+    }
+
     companion object {
         private const val PREFS_NAME = "radar_lite_prefs"
+        const val KEY_THEME_PREFERENCE = "theme_preference"
+        const val THEME_AUTO = "auto"
+        const val THEME_DAY = "day"
+        const val THEME_NIGHT = "night"
+
+        const val KEY_FLAGGED_FOR_REVIEW = "flagged_for_review"
+
         const val KEY_WARN_ONLY_OVER_SPEED = "warn_only_over_speed"
         const val KEY_IS_SOUND_ENABLED = "is_sound_enabled"
         const val KEY_IS_NIGHT_MODE_ENABLED = "is_night_mode_enabled"

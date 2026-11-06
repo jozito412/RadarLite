@@ -98,15 +98,30 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import androidx.core.content.FileProvider
+import androidx.compose.foundation.isSystemInDarkTheme
 
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val prefs = PreferencesManager.getInstance(this)
+        prefs.applyAppTheme()
         enableEdgeToEdge()
         setContent {
-            RadarLiteTheme {
-                RadarLiteApp()
+            var currentTheme by remember { mutableStateOf(prefs.themePreference) }
+            val systemDark = isSystemInDarkTheme()
+            val isDarkTheme = when (currentTheme) {
+                PreferencesManager.THEME_NIGHT -> true
+                PreferencesManager.THEME_DAY -> false
+                else -> systemDark
+            }
+            RadarLiteTheme(darkTheme = isDarkTheme) {
+                RadarLiteApp(
+                    currentTheme = currentTheme,
+                    onThemeChange = { newTheme ->
+                        currentTheme = newTheme
+                    }
+                )
             }
         }
     }
@@ -114,7 +129,10 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RadarLiteApp() {
+fun RadarLiteApp(
+    currentTheme: String = "",
+    onThemeChange: (String) -> Unit = {}
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val prefs = remember { PreferencesManager.getInstance(context) }
@@ -122,6 +140,7 @@ fun RadarLiteApp() {
     val coroutineScope = rememberCoroutineScope()
     var showBlacklistDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
+    var showFlaggedDialog by remember { mutableStateOf(false) }
 
     // Estados de sincronização com o GitHub (Safe Swap)
     var isSyncing by remember { mutableStateOf(false) }
@@ -140,6 +159,7 @@ fun RadarLiteApp() {
     // Preferência do usuário persistida no SharedPreferences
     var warnOnlyOverSpeed by remember { mutableStateOf(prefs.warnOnlyOverSpeed) }
     var isSoundEnabled by remember { mutableStateOf(prefs.isSoundEnabled) }
+    var themePreference by remember(currentTheme) { mutableStateOf(if (currentTheme.isNotEmpty()) currentTheme else prefs.themePreference) }
     var isNightModeEnabled by remember { mutableStateOf(prefs.isNightModeEnabled) }
     var isHudModeEnabled by remember { mutableStateOf(prefs.isHudModeEnabled) }
     var isBluetoothAutostartEnabled by remember { mutableStateOf(prefs.isBluetoothAutostartEnabled) }
@@ -158,6 +178,7 @@ fun RadarLiteApp() {
     // Fase 9: Filtro Anti-Falsos Positivos (OSM e Blacklist)
     var blockOsmRadars by remember { mutableStateOf(prefs.blockOsmRadars) }
     var blacklistedCount by remember { mutableIntStateOf(prefs.blacklistedRadarIds.size) }
+    var flaggedCount by remember { mutableIntStateOf(prefs.flaggedForReview.size) }
 
     // Estados de permissão
     var hasBluetoothPermission by remember {
@@ -260,6 +281,7 @@ fun RadarLiteApp() {
                 }
 
                 blacklistedCount = prefs.blacklistedRadarIds.size
+                flaggedCount = prefs.flaggedForReview.size
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -804,38 +826,78 @@ fun RadarLiteApp() {
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Switch 3: Modo Noturno (Fundo Escuro)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                            Text(
-                                text = "Modo Noturno (Fundo Escuro)",
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 15.sp
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Fundo preto absoluto (#000000) e alto contraste. Não ofusca a visão à noite. Visão direta na multimídia ou suporte (sem espelhar).",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                            )
-                        }
-
-                        Switch(
-                            checked = isNightModeEnabled,
-                            onCheckedChange = { isChecked ->
-                                isNightModeEnabled = isChecked
-                                prefs.isNightModeEnabled = isChecked
-                                RadarOverlayService.setNightMode(isChecked)
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = MaterialTheme.colorScheme.primary,
-                                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
-                            )
+                    // Opção Unificada de Tema: Modo Noturno / Diurno / Automático
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "Tema do Aplicativo (Modo Noturno / Diurno)",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 15.sp
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Aplica o visual em todo o aplicativo (telas, menus e cards de alerta flutuantes).",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        val themeOptions = listOf(
+                            Triple(PreferencesManager.THEME_AUTO, "Automático", "Segue o sistema"),
+                            Triple(PreferencesManager.THEME_DAY, "Dia", "Modo Claro"),
+                            Triple(PreferencesManager.THEME_NIGHT, "Noite", "Alto Contraste")
+                        )
+
+                        val systemDark = isSystemInDarkTheme()
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            themeOptions.forEach { (optionKey, label, desc) ->
+                                val isSelected = themePreference == optionKey
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        width = if (isSelected) 2.dp else 1.dp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable {
+                                            themePreference = optionKey
+                                            prefs.themePreference = optionKey
+                                            onThemeChange(optionKey)
+                                            val isDark = when (optionKey) {
+                                                PreferencesManager.THEME_NIGHT -> true
+                                                PreferencesManager.THEME_DAY -> false
+                                                else -> systemDark
+                                            }
+                                            RadarOverlayService.setNightMode(isDark)
+                                        }
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            fontSize = 13.sp,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = desc,
+                                            fontSize = 10.sp,
+                                            textAlign = TextAlign.Center,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                            lineHeight = 12.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -1037,6 +1099,96 @@ fun RadarLiteApp() {
                             ) {
                                 Text(
                                     text = "Exportar Blacklist",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                    }
+
+                    // Seção de Radares Marcados para Revisão / Correção de Base (🚩)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Radares Marcados para Revisão (🚩)",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp
+                                )
+                                Text(
+                                    text = if (flaggedCount > 0)
+                                        "$flaggedCount radar(es) reportado(s) pelo botão 🚩 no card"
+                                    else
+                                        "Nenhum radar marcado para revisão",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                                )
+                            }
+                            if (flaggedCount > 0) {
+                                TextButton(
+                                    onClick = {
+                                        prefs.clearFlaggedRadars()
+                                        flaggedCount = 0
+                                        Toast.makeText(context, "Lista de revisão limpa!", Toast.LENGTH_SHORT).show()
+                                    }
+                                ) {
+                                    Text("Limpar", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { showFlaggedDialog = true },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text(
+                                    text = "Ver Lista",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+
+                            Button(
+                                onClick = {
+                                    val currentFlagged = prefs.flaggedForReview
+                                    if (currentFlagged.isEmpty()) {
+                                        Toast.makeText(context, "Nenhum radar marcado para exportar", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        try {
+                                            val content = "RadarLite - Radares Marcados para Revisão:\n\n" + currentFlagged.joinToString("\n")
+                                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                                type = "text/plain"
+                                                putExtra(Intent.EXTRA_SUBJECT, "RadarLite - Relatório de Radares para Revisão")
+                                                putExtra(Intent.EXTRA_TEXT, content)
+                                            }
+                                            val chooser = Intent.createChooser(sendIntent, "Exportar Lista para Revisão")
+                                            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            context.startActivity(chooser)
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Erro ao exportar: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text(
+                                    text = "Exportar",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.SemiBold,
                                 )
@@ -1662,6 +1814,83 @@ fun RadarLiteApp() {
             radarDao = radarDao,
             onBlacklistUpdated = {
                 blacklistedCount = prefs.blacklistedRadarIds.size
+                flaggedCount = prefs.flaggedForReview.size
+            }
+        )
+    }
+
+    // Tela de Gestão de Radares Marcados para Revisão (🚩)
+    if (showFlaggedDialog) {
+        val flaggedIds = prefs.flaggedForReview.toList()
+        AlertDialog(
+            onDismissRequest = { showFlaggedDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "🚩", fontSize = 22.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Radares para Revisão (${flaggedIds.size})",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 360.dp)
+                ) {
+                    Text(
+                        text = "IDs marcados pelo botão 🚩 durante viagens para checagem ou exclusão:",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    if (flaggedIds.isEmpty()) {
+                        Text(
+                            text = "Nenhum radar marcado no momento.",
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                        ) {
+                            items(flaggedIds) { idStr ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "ID: $idStr",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp
+                                    )
+                                    TextButton(
+                                        onClick = {
+                                            idStr.toLongOrNull()?.let { prefs.unflagRadarForReview(it) }
+                                            flaggedCount = prefs.flaggedForReview.size
+                                        }
+                                    ) {
+                                        Text("Remover", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showFlaggedDialog = false }) {
+                    Text("Fechar")
+                }
             }
         )
     }

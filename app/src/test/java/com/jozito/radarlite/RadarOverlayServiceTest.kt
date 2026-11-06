@@ -3,6 +3,7 @@ package com.jozito.radarlite
 import com.jozito.radarlite.data.PreferencesManager
 import com.jozito.radarlite.data.RadarEntity
 import com.jozito.radarlite.service.RadarOverlayService
+import com.jozito.radarlite.service.NearbyRadar
 import kotlin.math.roundToInt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -779,6 +780,78 @@ class RadarOverlayServiceTest {
         // "Atrás": abs > 120°
         assertEquals("Atrás", RadarOverlayService.getRelativePositionLabel(160f))
         assertEquals("Atrás", RadarOverlayService.getRelativePositionLabel(-150f))
+    }
+
+    @Test
+    fun testSubsumptionOfZeroSpeedRadar() {
+        val baseRadar60 = RadarEntity(
+            id = 101L,
+            latitude = -25.4284,
+            longitude = -49.2733,
+            speedLimit = 60,
+            type = "FIXED",
+            bearing = 90.0,
+            source = "DNIT"
+        )
+
+        val zeroSpeedTrafficLight = RadarEntity(
+            id = 102L,
+            latitude = -25.4284 + 0.00008, // ~9 metros
+            longitude = -49.2733,
+            speedLimit = 0,
+            type = "TRAFFIC_LIGHT",
+            bearing = 90.0,
+            source = "MAPARADAR"
+        )
+
+        // Solução 1: Ponto 0 km/h no mesmo pórtico/semáforo é considerado clone para fusão
+        assertTrue(RadarOverlayService.areClones(baseRadar60, zeroSpeedTrafficLight))
+
+        // Na deduplicação, o radar com velocidade 60 km/h vence e absorve o tipo TRAFFIC_LIGHT
+        val deduplicated = RadarOverlayService.deduplicateRadars(listOf(zeroSpeedTrafficLight, baseRadar60))
+        assertEquals(1, deduplicated.size)
+        assertEquals(60, deduplicated[0].speedLimit)
+        assertEquals("TRAFFIC_LIGHT", deduplicated[0].type)
+    }
+
+    @Test
+    fun testHeuristicRadarSorting() {
+        val zeroSpeedRadar = RadarEntity(
+            id = 201L,
+            latitude = -25.4284,
+            longitude = -49.2733,
+            speedLimit = 0,
+            type = "TRAFFIC_LIGHT"
+        )
+
+        val speedRadar = RadarEntity(
+            id = 202L,
+            latitude = -25.4285,
+            longitude = -49.2733,
+            speedLimit = 60,
+            type = "FIXED"
+        )
+
+        val itemZeroSpeed = NearbyRadar(
+            radar = zeroSpeedRadar,
+            distanceMeters = 100f,
+            relativeAngleDeg = 0f
+        )
+
+        val itemSpeedRadar = NearbyRadar(
+            radar = speedRadar,
+            distanceMeters = 105f, // ligeiramente mais longe
+            relativeAngleDeg = 0f
+        )
+
+        val sorted = listOf(itemZeroSpeed, itemSpeedRadar).sortedWith(
+            compareByDescending<NearbyRadar> { it.radar.speedLimit > 0 }
+                .thenBy { kotlin.math.abs(it.relativeAngleDeg) > 45f }
+                .thenBy { it.distanceMeters }
+        )
+
+        // Solução 2: O radar com velocidade real (60 km/h) vence o ponto de 0 km/h mesmo estando 5m mais longe
+        assertEquals(202L, sorted[0].radar.id)
     }
 }
 

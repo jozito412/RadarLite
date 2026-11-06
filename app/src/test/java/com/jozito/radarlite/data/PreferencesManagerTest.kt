@@ -30,6 +30,13 @@ class PreferencesManagerTest {
         assertEquals("block_osm_radars", PreferencesManager.KEY_BLOCK_OSM_RADARS)
         assertEquals("banned_approaches", PreferencesManager.KEY_BANNED_APPROACHES)
         assertEquals("blacklisted_radar_ids", PreferencesManager.KEY_BLACKLISTED_RADAR_IDS)
+
+        // Unified Theme & Flagged for review
+        assertEquals("theme_preference", PreferencesManager.KEY_THEME_PREFERENCE)
+        assertEquals("auto", PreferencesManager.THEME_AUTO)
+        assertEquals("day", PreferencesManager.THEME_DAY)
+        assertEquals("night", PreferencesManager.THEME_NIGHT)
+        assertEquals("flagged_for_review", PreferencesManager.KEY_FLAGGED_FOR_REVIEW)
     }
 
     @Test
