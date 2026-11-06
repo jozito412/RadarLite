@@ -62,6 +62,8 @@ class PreferencesManager(context: Context) {
 
     /**
      * Define se o Modo Noturno (fundo escuro de alto contraste, visão direta) está ativado.
+     * Quando true, aplica fundo preto (#000000) e alto contraste para não ofuscar à noite,
+     * mantendo a visualização normal direta (sem espelhar a tela).
      * Mantido para total compatibilidade retroativa com código existente.
      */
     var isNightModeEnabled: Boolean
