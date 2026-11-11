@@ -395,13 +395,46 @@ class PreferencesManager(context: Context) {
     }
 
     /**
-     * Limpa toda a Blacklist de radares banidos.
+     * Limpa toda a Blacklist de radares banidos e seus strikes acumulados.
      */
     fun clearBlacklistedRadars() {
+        clearAllBanStrikes()
         prefs.edit()
             .remove(KEY_BANNED_APPROACHES)
             .remove(KEY_BLACKLISTED_RADAR_IDS)
             .apply()
+    }
+
+    /**
+     * Retorna o número de strikes acumulados para um radar antes do banimento definitivo.
+     */
+    fun getBanStrikes(radarId: Long): Int {
+        return prefs.getInt("${KEY_RADAR_STRIKE_PREFIX}$radarId", 0)
+    }
+
+    /**
+     * Registra um strike para o radar em uma passagem do veículo e retorna o novo total de strikes (1, 2 ou 3).
+     */
+    fun recordBanStrike(radarId: Long): Int {
+        val next = getBanStrikes(radarId) + 1
+        prefs.edit().putInt("${KEY_RADAR_STRIKE_PREFIX}$radarId", next).apply()
+        return next
+    }
+
+    /**
+     * Limpa os strikes acumulados para o radar (chamado após o banimento definitivo no 3º strike ou banimento global).
+     */
+    fun clearBanStrikes(radarId: Long) {
+        prefs.edit().remove("${KEY_RADAR_STRIKE_PREFIX}$radarId").apply()
+    }
+
+    /**
+     * Limpa todos os strikes acumulados na base local.
+     */
+    fun clearAllBanStrikes() {
+        val editor = prefs.edit()
+        prefs.all.keys.filter { it.startsWith(KEY_RADAR_STRIKE_PREFIX) }.forEach { editor.remove(it) }
+        editor.apply()
     }
 
     /**
@@ -438,6 +471,7 @@ class PreferencesManager(context: Context) {
         const val THEME_NIGHT = "night"
 
         const val KEY_FLAGGED_FOR_REVIEW = "flagged_for_review"
+        const val KEY_RADAR_STRIKE_PREFIX = "radar_strike_"
 
         const val KEY_WARN_ONLY_OVER_SPEED = "warn_only_over_speed"
         const val KEY_IS_SOUND_ENABLED = "is_sound_enabled"

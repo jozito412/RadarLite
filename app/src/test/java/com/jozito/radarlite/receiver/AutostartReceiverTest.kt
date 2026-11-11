@@ -199,4 +199,23 @@ class AutostartReceiverTest {
         // O pulso do Launcher deve ser ignorado para respeitar a decisão do motorista
         assertFalse(shouldProcessWatchdogWake(isIntentionallyStopped = true))
     }
+
+    @Test
+    fun testBluetoothTargetMatchingWithSamsungS25() {
+        val s25Mac = "64:16:66:AA:BB:CC"
+        val s25Name = "Galaxy S25"
+
+        // 1. MAC e Nome configurados exatamente
+        assertTrue(AutostartReceiver.isTargetBluetoothDevice(s25Mac, s25Mac, s25Name, s25Name))
+
+        // 2. Multimídia recebeu apenas "S25" como substring no nome do dispositivo
+        assertTrue(AutostartReceiver.isTargetBluetoothDevice("XX:XX:XX", null, "S25", "Galaxy S25"))
+        assertTrue(AutostartReceiver.isTargetBluetoothDevice("XX:XX:XX", null, "Galaxy S25 Ultra", "S25"))
+
+        // 3. Caso o MAC coincida mesmo que o nome seja nulo
+        assertTrue(AutostartReceiver.isTargetBluetoothDevice(s25Mac, s25Mac, null, "Galaxy S25"))
+
+        // 4. Dispositivo não relacionado é rejeitado
+        assertFalse(AutostartReceiver.isTargetBluetoothDevice("11:22:33:44:55:66", s25Mac, "Fone JBL", s25Name))
+    }
 }

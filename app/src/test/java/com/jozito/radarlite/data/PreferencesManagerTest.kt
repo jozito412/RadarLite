@@ -37,6 +37,7 @@ class PreferencesManagerTest {
         assertEquals("day", PreferencesManager.THEME_DAY)
         assertEquals("night", PreferencesManager.THEME_NIGHT)
         assertEquals("flagged_for_review", PreferencesManager.KEY_FLAGGED_FOR_REVIEW)
+        assertEquals("radar_strike_", PreferencesManager.KEY_RADAR_STRIKE_PREFIX)
     }
 
     @Test
@@ -215,5 +216,39 @@ class PreferencesManagerTest {
         bannedApproaches.removeAll { it == "5000" || it.startsWith(prefix5000) }
         assertFalse(isRadarGloballyBanned(5000L))
         assertFalse(isApproachBanned(5000L, 0.0))
+    }
+
+    @Test
+    fun testBanStrikesAccumulation() {
+        val strikesMap = mutableMapOf<Long, Int>()
+
+        fun getBanStrikes(radarId: Long): Int = strikesMap[radarId] ?: 0
+        fun recordBanStrike(radarId: Long): Int {
+            val next = getBanStrikes(radarId) + 1
+            strikesMap[radarId] = next
+            return next
+        }
+        fun clearBanStrikes(radarId: Long) {
+            strikesMap.remove(radarId)
+        }
+
+        val testRadarId = 98765L
+        assertEquals(0, getBanStrikes(testRadarId))
+
+        // Passagem 1: Primeiro descarte do radar
+        assertEquals(1, recordBanStrike(testRadarId))
+        assertEquals(1, getBanStrikes(testRadarId))
+
+        // Passagem 2: Segundo descarte em viagem futura
+        assertEquals(2, recordBanStrike(testRadarId))
+        assertEquals(2, getBanStrikes(testRadarId))
+
+        // Passagem 3: Terceiro descarte culmina no banimento definitivo
+        assertEquals(3, recordBanStrike(testRadarId))
+        assertEquals(3, getBanStrikes(testRadarId))
+
+        // Limpeza dos strikes pós-banimento
+        clearBanStrikes(testRadarId)
+        assertEquals(0, getBanStrikes(testRadarId))
     }
 }

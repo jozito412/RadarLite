@@ -1978,12 +1978,45 @@ fun RadarLiteApp(
                         Spacer(modifier = Modifier.height(10.dp))
                     }
 
+                    // Versão 1.2.8
+                    item {
+                        ChangelogVersionCard(
+                            version = "v1.2.8",
+                            buildNumber = "Build 10",
+                            isLatest = true,
+                            date = "Novembro 2026",
+                            items = listOf(
+                                "📡 Gestão Aprimorada de Sinal GPS: Ocultação rápida do aviso de perda de sinal (3.5s), novo aviso de 'Sinal GPS Recuperado' ao restabelecer conexão e cooldown de 3 minutos para evitar mensagens repetitivas.",
+                                "❌ Sistema de 3 Strikes por Passagem: Toque no botão X oculta imediatamente o alerta na passagem atual e acumula strikes persistentes entre diferentes viagens até o banimento definitivo no 3º descarte.",
+                                "📲 Autostart por Bluetooth Confiável: A conexão com o smartphone selecionado (Galaxy S25) restaura a intenção de execução e aciona o serviço via Trampoline Activity invisível, superando restrições de Background FGS."
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    // Versão 1.2.7
+                    item {
+                        ChangelogVersionCard(
+                            version = "v1.2.7",
+                            buildNumber = "Build 9",
+                            isLatest = false,
+                            date = "Novembro 2026",
+                            items = listOf(
+                                "🎯 Priorização Heurística: Filtro para radares de 0 km/h e prioridade para radares na mesma via de tráfego.",
+                                "🌓 Modo Noturno Unificado: Controle global do tema do app (Auto/Dia/Noite) integrado às configurações.",
+                                "📊 Barra de Progresso de Distância: Indicador visual dinâmico de aproximação no card flutuante.",
+                                "🚩 Sinalização para Revisão: Botão de marcação de radares com divergências para exportação e correção."
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
                     // Versão 1.2.6
                     item {
                         ChangelogVersionCard(
                             version = "v1.2.6",
                             buildNumber = "Build 8",
-                            isLatest = true,
+                            isLatest = false,
                             date = "Novembro 2026",
                             items = listOf(
                                 "⚡ Rota Expressa de Devolução (Foreground Broadcast): Emissão de ACTION_STATE_CHANGED com FLAG_RECEIVER_FOREGROUND e FLAG_INCLUDE_STOPPED_PACKAGES, contornando o descarte em segundo plano pelo SO da multimídia.",

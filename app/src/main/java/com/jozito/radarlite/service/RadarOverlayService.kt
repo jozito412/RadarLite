@@ -171,20 +171,22 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     // Conjunto de IDs de radares temporariamente ocultados pelo motorista (ao tocar no card naquele instante)
     private val temporarilyDismissedRadarIds = mutableSetOf<Long>()
 
-    // Sistema de 3 Strikes por sessão de radar para proteção contra banimentos acidentais ao volante
+    // Sistema de 3 Strikes por sessão de radar mantido em RAM para compatibilidade
     private val banStrikesMap = mutableMapOf<Long, Int>()
 
     /**
      * Oculta temporariamente o alerta do radar naquele instante sem enviá-lo para a blacklist.
      * O radar voltará a alertar normalmente em viagens futuras ou após o veículo se afastar.
      */
-    fun dismissRadarTemporarily(radarId: Long) {
+    fun dismissRadarTemporarily(radarId: Long, showToast: Boolean = true) {
         temporarilyDismissedRadarIds.add(radarId)
         if (_closestRadar.value?.radar?.id == radarId) {
             val next = _nearbyRadars.value.firstOrNull { it.radar.id !in temporarilyDismissedRadarIds }
             _closestRadar.value = next
         }
-        Toast.makeText(applicationContext, "Alerta ocultado", Toast.LENGTH_SHORT).show()
+        if (showToast) {
+            Toast.makeText(applicationContext, "Alerta ocultado", Toast.LENGTH_SHORT).show()
+        }
     }
 
     /**
@@ -250,6 +252,24 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     // Se a última leitura do GPS for mais antiga que 10.000ms, assume perda de sinal
     private var lastGpsUpdateTimestamp: Long = 0L
     private var gpsWatchdogJob: Job? = null
+    private var gpsNoticeHideJob: Job? = null
+    private var lastGpsLostNoticeTimestamp: Long = 0L
+    private var hasHadGpsFix: Boolean = false
+
+    /**
+     * Exibe um aviso visual rápido e transitório sobre o status do GPS (Perdido ou Recuperado)
+     * e oculta-o automaticamente após 3.5 segundos.
+     */
+    private fun showGpsNotice(type: GpsNoticeType) {
+        gpsNoticeHideJob?.cancel()
+        _gpsNotice.value = type
+        gpsNoticeHideJob = lifecycleScope.launch(Dispatchers.Main) {
+            delay(3500L)
+            if (_gpsNotice.value == type) {
+                _gpsNotice.value = GpsNoticeType.NONE
+            }
+        }
+    }
 
     // WakeLock para manter a CPU e GPS acordados mesmo com a tela apagada no bolso ou console do carro
     private var wakeLock: PowerManager.WakeLock? = null
@@ -341,10 +361,18 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
         // Timeout de sinal do GPS (10.000ms tolerante a desvios urbanos sem perder túneis)
         const val GPS_TIMEOUT_MS = 10_000L
+        const val GPS_LOST_COOLDOWN_MS = 180_000L // 3 minutos de cooldown para alerta de sinal GPS perdido
+
+        // Tipos de avisos transitórios de status do sinal GPS
+        enum class GpsNoticeType { NONE, LOST, RESTORED }
 
         // Estado reativo compartilhado para indicar perda de sinal GPS
         private val _isGpsLost = MutableStateFlow(false)
         val isGpsLost: StateFlow<Boolean> = _isGpsLost.asStateFlow()
+
+        // Aviso visual transitório de status GPS (Perdido / Recuperado)
+        private val _gpsNotice = MutableStateFlow(GpsNoticeType.NONE)
+        val gpsNotice: StateFlow<GpsNoticeType> = _gpsNotice.asStateFlow()
 
         // Modo Noturno (fundo preto absoluto de alto contraste, visão direta sem espelhar)
         private val _isNightMode = MutableStateFlow(false)
@@ -992,6 +1020,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         preferencesManager.setServiceIntentionallyStoppedSync(true)
         broadcastState(applicationContext, false)
         _isGpsLost.value = false
+        _gpsNotice.value = GpsNoticeType.NONE
+        gpsNoticeHideJob?.cancel()
         _closestRadarAlertDistance.value = PreferencesManager.DEFAULT_DIST_HIGHWAY.toFloat()
         stopGpsWatchdog()
         stopLocationUpdates()
@@ -1039,6 +1069,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         _isRunning.value = false
         broadcastState(applicationContext, false)
         _isGpsLost.value = false
+        _gpsNotice.value = GpsNoticeType.NONE
+        gpsNoticeHideJob?.cancel()
         _closestRadarAlertDistance.value = PreferencesManager.DEFAULT_DIST_HIGHWAY.toFloat()
         stopGpsWatchdog()
         stopLocationUpdates()
@@ -1133,10 +1165,11 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     }
 
     /**
-     * Sistema de Proteção contra Banimento Acidental (3 Strikes):
-     * - Tap 1: "Strike 1: Toque mais 2 vezes para banir"
-     * - Tap 2: "Strike 2: Toque mais 1 vez para banir"
-     * - Tap 3: Executa o banimento efetivo no vetor direcional, fecha o card e avisa "Radar banido".
+     * Sistema de Proteção contra Banimento Acidental (3 Strikes acumulados em passagens diferentes):
+     * - Ao clicar no X, o card se oculta imediatamente para a passagem atual.
+     * - Passagem 1: Registra Strike 1 ("Strike 1 de 3: Alerta ocultado. Mais 2 descartes para banir.").
+     * - Passagem 2: Na próxima vez que o usuário passar pelo radar, registra Strike 2 ("Strike 2 de 3: Alerta ocultado. Mais 1 descarte para banir.").
+     * - Passagem 3: Na 3ª vez, executa o banimento efetivo no vetor direcional ("Strike 3 de 3: Radar banido no sentido ~XXº!").
      * - global == true (Toque Longo / Long Press): Executa o banimento global imediato intencional em todas as direções.
      */
     fun banCurrentRadar(global: Boolean = false) {
@@ -1145,36 +1178,49 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
         if (global) {
             preferencesManager.banRadarGlobally(radarId)
+            preferencesManager.clearBanStrikes(radarId)
             banStrikesMap.remove(radarId)
             Toast.makeText(this@RadarOverlayService, "Radar banido em TODAS as direções", Toast.LENGTH_SHORT).show()
             Log.i(TAG, "Radar $radarId banido GLOBALMENTE via banCurrentRadar(global = true). Janela flutuante apagada instantaneamente.")
-            _nearbyRadars.value = _nearbyRadars.value.filter { it.radar.id != radarId }
-            _closestRadar.value = null
+            dismissRadarTemporarily(radarId, showToast = false)
             return
         }
 
-        // Sistema 3-Strikes para toque simples
-        val strikes = (banStrikesMap[radarId] ?: 0) + 1
-        banStrikesMap[radarId] = strikes
+        // Sistema 3-Strikes persistente entre passagens diferentes
+        val strikes = preferencesManager.recordBanStrike(radarId)
+        dismissRadarTemporarily(radarId, showToast = false)
 
         when (strikes) {
             1 -> {
-                Toast.makeText(this@RadarOverlayService, "Strike 1: Toque mais 2 vezes para banir", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    this@RadarOverlayService,
+                    "Strike 1 de 3: Alerta ocultado. Mais 2 descartes para banir.",
+                    Toast.LENGTH_LONG
+                ).show()
+                Log.i(TAG, "Strike 1 registrado para radar $radarId. Alerta ocultado nesta passagem.")
             }
             2 -> {
-                Toast.makeText(this@RadarOverlayService, "Strike 2: Toque mais 1 vez para banir", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    this@RadarOverlayService,
+                    "Strike 2 de 3: Alerta ocultado. Mais 1 descarte para banir.",
+                    Toast.LENGTH_LONG
+                ).show()
+                Log.i(TAG, "Strike 2 registrado para radar $radarId. Alerta ocultado nesta passagem.")
             }
             else -> {
+                preferencesManager.clearBanStrikes(radarId)
                 banStrikesMap.remove(radarId)
                 val currentBearing = lastValidBearing ?: _currentLocation.value?.let { loc ->
                     if (loc.hasBearing() && loc.bearing != 0.0f) loc.bearing else null
                 } ?: 0.0f
                 val normBearing = ((currentBearing.roundToInt() % 360) + 360) % 360
                 preferencesManager.banApproach(radarId, normBearing.toDouble())
-                Toast.makeText(this@RadarOverlayService, "Radar banido", Toast.LENGTH_SHORT).show()
-                Log.i(TAG, "Radar $radarId banido após 3 strikes no vetor direcional $normBearing°.")
-                _nearbyRadars.value = _nearbyRadars.value.filter { it.radar.id != radarId }
-                _closestRadar.value = null
+                Toast.makeText(
+                    this@RadarOverlayService,
+                    "Strike 3 de 3: Radar banido no sentido ~${normBearing}º!",
+                    Toast.LENGTH_LONG
+                ).show()
+                Log.i(TAG, "Radar $radarId banido permanentemente após 3 strikes no vetor direcional $normBearing°.")
             }
         }
     }
@@ -1226,6 +1272,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         val closestRadarState by closestRadar.collectAsState()
         val speedState by currentSpeedKmh.collectAsState()
         val isGpsLostState by isGpsLost.collectAsState()
+        val gpsNoticeState by gpsNotice.collectAsState()
         val isNightMode by isNightMode.collectAsState()
         val isHudMode by isHudMode.collectAsState()
         val isCenterBigCardState by isCenterBigCard.collectAsState()
@@ -1238,13 +1285,29 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                 if (isHudMode) Modifier.graphicsLayer { scaleX = -1f } else Modifier
             )
         ) {
-            // Se o sinal de GPS for perdido (túneis ou zonas mortas): exibe ícone cinza discreto
+            // Se houver aviso transitório de GPS (Perdido ou Recuperado): exibe card discreto por 3.5s
             AnimatedVisibility(
-                visible = isGpsLostState,
+                visible = gpsNoticeState != GpsNoticeType.NONE,
                 enter = fadeIn(animationSpec = tween(200)),
                 exit = fadeOut(animationSpec = tween(200))
             ) {
-                GpsLostOverlay(isDarkMode = isDarkMode)
+                when (gpsNoticeState) {
+                    GpsNoticeType.LOST -> GpsStatusOverlay(
+                        icon = "📡",
+                        title = "Sinal GPS Perdido",
+                        subtitle = "Buscando satélites...",
+                        isLost = true,
+                        isDarkMode = isDarkMode
+                    )
+                    GpsNoticeType.RESTORED -> GpsStatusOverlay(
+                        icon = "🛰️",
+                        title = "Sinal GPS Recuperado",
+                        subtitle = "Conexão restabelecida",
+                        isLost = false,
+                        isDarkMode = isDarkMode
+                    )
+                    GpsNoticeType.NONE -> {}
+                }
             }
 
             AnimatedVisibility(
@@ -1816,10 +1879,17 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     }
 
     /**
-     * Card discreto com ícone cinza para sinalização de GPS perdido em túneis ou zonas mortas.
+     * Card discreto para sinalização transitória de status do GPS (Perdido ou Recuperado).
      */
     @Composable
-    private fun GpsLostOverlay(isDarkMode: Boolean) {
+    private fun GpsStatusOverlay(
+        icon: String,
+        title: String,
+        subtitle: String,
+        isLost: Boolean,
+        isDarkMode: Boolean
+    ) {
+        val accentColor = if (isLost) Color(0xFFFF5252) else Color(0xFF4CAF50)
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
@@ -1834,14 +1904,22 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = "📡", fontSize = 16.sp)
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "Sinal GPS Perdido",
-                    color = Color(0xFFECEFF1),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Text(text = icon, fontSize = 18.sp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        text = title,
+                        color = Color(0xFFECEFF1),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = subtitle,
+                        color = accentColor,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
     }
@@ -2432,9 +2510,11 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                 val location = locationResult.lastLocation ?: return
 
                 lastGpsUpdateTimestamp = System.currentTimeMillis()
+                hasHadGpsFix = true
                 if (_isGpsLost.value) {
                     _isGpsLost.value = false
                     Log.i(TAG, "Sinal GPS restabelecido.")
+                    showGpsNotice(GpsNoticeType.RESTORED)
                 }
 
                 lifecycleScope.launch {
@@ -2521,13 +2601,21 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                 delay(2000L)
                 val now = System.currentTimeMillis()
                 val allowedTimeout = if (isStandbyMode) 15_000L else GPS_TIMEOUT_MS
-                if (lastGpsUpdateTimestamp > 0L && (now - lastGpsUpdateTimestamp > allowedTimeout)) {
+                if (hasHadGpsFix && lastGpsUpdateTimestamp > 0L && (now - lastGpsUpdateTimestamp > allowedTimeout)) {
                     if (!_isGpsLost.value) {
                         Log.w(TAG, "Sinal GPS perdido detectado (última leitura há ${now - lastGpsUpdateTimestamp}ms). Limpando alerta ativo.")
                         _isGpsLost.value = true
                         _closestRadar.value = null
                         _nearbyRadars.value = emptyList()
                         _closestRadarAlertDistance.value = PreferencesManager.DEFAULT_DIST_HIGHWAY.toFloat()
+
+                        // Cooldown de 3 minutos para exibir o card de perda de sinal na tela
+                        if (now - lastGpsLostNoticeTimestamp >= GPS_LOST_COOLDOWN_MS) {
+                            lastGpsLostNoticeTimestamp = now
+                            showGpsNotice(GpsNoticeType.LOST)
+                        } else {
+                            Log.d(TAG, "Aviso visual de GPS perdido suprimido pelo cooldown de 3 minutos.")
+                        }
                     }
                 }
             }
@@ -2762,7 +2850,6 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         // Mantém no histórico apenas os radares que continuam ativos no campo de visão
         val currentNearbyIds = matchingRadars.map { it.radar.id }.toSet()
         radarDistanceHistory.keys.retainAll(currentNearbyIds)
-        banStrikesMap.keys.retainAll(currentNearbyIds) // Reseta strikes quando o radar sai de alcance
 
         // Limpa do conjunto temporário radares que já saíram das proximidades físicas
         val candidateIds = candidates.map { it.id }.toSet()

@@ -1,6 +1,7 @@
 package com.jozito.radarlite.receiver
 
 import android.bluetooth.BluetoothA2dp
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothHeadset
 import android.bluetooth.BluetoothProfile
@@ -157,16 +158,48 @@ class AutostartReceiver : BroadcastReceiver() {
             deviceName: String? = null,
             configuredName: String? = null
         ): Boolean {
-            // Se o usuário configurou um MAC específico, aceita apenas se for igual
-            if (!configuredAddress.isNullOrBlank()) {
-                return deviceAddress != null && deviceAddress.equals(configuredAddress, ignoreCase = true)
-            }
-            // Se o usuário configurou um Nome amigável específico, aceita apenas se for igual
-            if (!configuredName.isNullOrBlank()) {
-                return deviceName != null && deviceName.equals(configuredName, ignoreCase = true)
-            }
+            val hasConfiguredAddress = !configuredAddress.isNullOrBlank()
+            val hasConfiguredName = !configuredName.isNullOrBlank() && configuredName != "Qualquer Dispositivo Bluetooth"
+
             // Modo genérico / sem filtro restritivo: aceita qualquer dispositivo pareado conectado
-            return true
+            if (!hasConfiguredAddress && !hasConfiguredName) {
+                return true
+            }
+
+            // 1. Validação por Endereço MAC (case-insensitive)
+            if (hasConfiguredAddress && !deviceAddress.isNullOrBlank()) {
+                if (deviceAddress.equals(configuredAddress, ignoreCase = true)) {
+                    return true
+                }
+            }
+
+            // 2. Validação por Nome do Aparelho (flexível, exato ou substring, ex: "S25" vs "Galaxy S25")
+            if (hasConfiguredName && !deviceName.isNullOrBlank()) {
+                val cleanDevName = deviceName.trim().lowercase()
+                val cleanCfgName = configuredName!!.trim().lowercase()
+                if (cleanDevName == cleanCfgName || cleanDevName.contains(cleanCfgName) || cleanCfgName.contains(cleanDevName)) {
+                    return true
+                }
+            }
+
+            // 3. Fallback: Se o configuredName foi definido mas deviceName era nulo/inacessível no intent,
+            // verifica se o MAC conectado pertence a algum dispositivo pareado que contenha o configuredName
+            if (hasConfiguredName && !deviceAddress.isNullOrBlank()) {
+                try {
+                    val adapter = BluetoothAdapter.getDefaultAdapter()
+                    val bonded = adapter?.bondedDevices
+                    val match = bonded?.firstOrNull { it.address.equals(deviceAddress, ignoreCase = true) }
+                    val bondedName = match?.name?.trim()?.lowercase()
+                    val cleanCfgName = configuredName!!.trim().lowercase()
+                    if (bondedName != null && (bondedName == cleanCfgName || bondedName.contains(cleanCfgName) || cleanCfgName.contains(bondedName))) {
+                        return true
+                    }
+                } catch (e: Exception) {
+                    // Ignora em caso de falta de permissão ou restrição
+                }
+            }
+
+            return false
         }
 
         fun isTargetBluetoothDevice(deviceAddress: String?, configuredAddress: String?): Boolean {
@@ -266,29 +299,63 @@ class AutostartReceiver : BroadcastReceiver() {
                 action == BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED
 
         if (isBtAction) {
-            // Fase 11: Se o usuário parou intencionalmente, não religa por Bluetooth
-            if (prefs.isServiceIntentionallyStopped && action != BluetoothDevice.ACTION_ACL_DISCONNECTED) {
-                Log.d(TAG, "Serviço parado intencionalmente pelo usuário (is_service_intentionally_stopped = true). Ignorando conexão Bluetooth.")
-                return
-            }
+            val isConnect = isAutostartIntent(intent)
+            val isDisconnect = isAutostopIntent(intent)
+
             if (!prefs.isAutostartEnabled) {
-                Log.d(TAG, "Autostart por Bluetooth desativado nas configurações. Ignorando evento $action.")
+                Log.d(TAG, "Autostart por Bluetooth desativado nas preferências (is_autostart_enabled = false). Ignorando evento $action.")
                 return
             }
 
-            val device: BluetoothDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-            } else {
+            val device: BluetoothDevice? = try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                }
+            } catch (e: Exception) {
                 @Suppress("DEPRECATION")
                 intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
             }
 
             val configuredAddress = prefs.selectedBluetoothDeviceAddress
             val configuredName = prefs.selectedBluetoothDeviceName
-            val deviceName = try { device?.name } catch (e: SecurityException) { null }
+            var deviceName: String? = null
+            try {
+                deviceName = device?.name
+            } catch (e: SecurityException) {
+                Log.w(TAG, "Permissão BLUETOOTH_CONNECT não concedida para ler device.name", e)
+            }
+
+            // Se o nome não pôde ser lido diretamente, tenta obter via bondedDevices do BluetoothAdapter
+            if (deviceName.isNullOrBlank() && device != null) {
+                try {
+                    val adapter = BluetoothAdapter.getDefaultAdapter()
+                    val bonded = adapter?.bondedDevices
+                    val match = bonded?.firstOrNull { it.address.equals(device.address, ignoreCase = true) }
+                    if (match != null) {
+                        deviceName = match.name
+                    }
+                } catch (e: Exception) {
+                    // Ignora
+                }
+            }
 
             if (!isTargetBluetoothDevice(device?.address, configuredAddress, deviceName, configuredName)) {
-                Log.d(TAG, "Dispositivo Bluetooth (${device?.address} / $deviceName) ignorado: não é o smartphone configurado ($configuredAddress / $configuredName).")
+                Log.d(TAG, "Dispositivo Bluetooth (${device?.address} / $deviceName) ignorado: não corresponde ao configurado ($configuredAddress / $configuredName).")
+                return
+            }
+
+            if (isConnect) {
+                Log.i(TAG, "Smartphone alvo conectado via Bluetooth (${device?.address} / $deviceName). Restaurando intenção e inicializando RadarOverlayService...")
+                // Conexão do smartphone pareado representa intenção ativa do usuário: anula qualquer bloqueio anterior
+                prefs.isServiceIntentionallyStopped = false
+                startServiceSilently(context, action)
+                return
+            } else if (isDisconnect) {
+                Log.i(TAG, "Smartphone alvo desconectado via Bluetooth (${device?.address} / $deviceName). Encerrando RadarOverlayService...")
+                stopServiceSilently(context, action)
                 return
             }
         }
@@ -312,17 +379,31 @@ class AutostartReceiver : BroadcastReceiver() {
                 return
             }
 
-            Log.i(TAG, "Inicializando RadarOverlayService silenciosamente a partir de $triggerAction (SDK: ${Build.VERSION.SDK_INT})...")
-            val serviceIntent = createServiceIntent(context)
+            Log.i(TAG, "Inicializando RadarOverlayService a partir de $triggerAction (SDK: ${Build.VERSION.SDK_INT})...")
+
+            // 1. Tenta acionar via Trampoline Activity invisível (garante inicialização em primeiro plano no Android 8.0+ / 14+)
             try {
+                val trampolineIntent = Intent(context, InvisibleStartActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                }
+                context.startActivity(trampolineIntent)
+                Log.d(TAG, "InvisibleStartActivity disparada com sucesso a partir de $triggerAction")
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "Falha ao iniciar InvisibleStartActivity, tentando fallback direto", e)
+            }
+
+            // 2. Fallback direto startForegroundService
+            try {
+                val serviceIntent = createServiceIntent(context)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     ContextCompat.startForegroundService(context, serviceIntent)
                 } else {
                     context.startService(serviceIntent)
                 }
-                Log.d(TAG, "RadarOverlayService iniciado com sucesso a partir de $triggerAction.")
+                Log.d(TAG, "RadarOverlayService iniciado com sucesso (fallback direto) a partir de $triggerAction.")
             } catch (e: Exception) {
-                Log.e(TAG, "Falha ao iniciar RadarOverlayService a partir de $triggerAction", e)
+                Log.e(TAG, "Falha ao iniciar RadarOverlayService no fallback direto a partir de $triggerAction", e)
             }
         }
     }
@@ -330,19 +411,16 @@ class AutostartReceiver : BroadcastReceiver() {
     private fun stopServiceSilently(context: Context, triggerAction: String) {
         Log.i(TAG, "Encerrando RadarOverlayService silenciosamente a partir de $triggerAction...")
         try {
-            // 1. Garante a intenção salva de forma síncrona
-            PreferencesManager.getInstance(context).setServiceIntentionallyStoppedSync(true)
-
-            // 2. Notifica instância ativa em RAM para parada imediata do overlay, sons e GPS
+            // 1. Notifica instância ativa em RAM para parada imediata do overlay, sons e GPS
             RadarOverlayService.activeInstance?.stopMonitoring()
 
-            // 3. Força interrupção do serviço via Context.stopService (NUNCA chamar startForegroundService para parar)
+            // 2. Força interrupção do serviço via Context.stopService (NUNCA chamar startForegroundService para parar)
             val stopIntent = Intent(context, RadarOverlayService::class.java).apply {
                 action = RadarOverlayService.ACTION_STOP
             }
             context.stopService(stopIntent)
 
-            // 4. Emite confirmação de estado desligado para sincronização com Launcher
+            // 3. Emite confirmação de estado desligado para sincronização com Launcher
             RadarOverlayService.broadcastState(context, false)
             Log.d(TAG, "RadarOverlayService encerrado com sucesso a partir de $triggerAction.")
         } catch (e: Exception) {

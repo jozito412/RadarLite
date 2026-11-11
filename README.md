@@ -2,13 +2,13 @@
   <img src="./RadarLite_icon.png" width="128" height="128" alt="RadarLite Icon" />
 </p>
 
-# 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.2.6)
+# 🚗 RadarLite — Monitoramento Automotivo Inteligente de Radares (v1.2.8)
 
 [![Android](https://img.shields.io/badge/Android-8.0%2B%20(API%2026%2B)-3DDC84?logo=android&logoColor=white)](#)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-7F52FF?logo=kotlin&logoColor=white)](#)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white)](#)
 [![Room](https://img.shields.io/badge/Room-SQLite%20Offline-FF6F00)](#)
-[![Versão](https://img.shields.io/badge/Versão-1.2.6-brightgreen)](#)
+[![Versão](https://img.shields.io/badge/Versão-1.2.8-brightgreen)](#)
 
 **RadarLite** é um aplicativo Android veicular de alta performance, leve, 100% offline e com interface moderna em **Jetpack Compose**. Projetado especificamente para motoristas e centrais multimídia automotivas, ele funciona como uma camada flutuante inteligente (*overlay*) sobre o Waze, Google Maps ou qualquer outro app de navegação.
 
@@ -16,7 +16,7 @@
 
 ## 📦 Download do Instalador
 
-Você pode baixar diretamente o instalador compilado da versão mais recente (**v1.2.6 - Build 8**):
+Você pode baixar diretamente o instalador compilado da versão mais recente (**v1.2.8 - Build 10**):
 - 📲 **[RadarLite.apk](./RadarLite.apk)** (Instalador oficial pronto para Android)
 
 ---
@@ -150,6 +150,17 @@ cd RadarLite
 ---
 
 ## 📜 Histórico de Versões (Changelog)
+
+### [v1.2.8 (Build 10)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.8) — *Novembro 2026*
+- 📡 **Gestão Aprimorada de Sinal GPS:** Aviso visual transitório de 3.5 segundos na perda de sinal, novo aviso discreto com destaque verde **"Sinal GPS Recuperado"** ao restabelecer conexão e cooldown de 3 minutos para eliminar poluição visual em túneis sucessivos.
+- ❌ **Sistema de 3 Strikes por Passagem no Banimento:** O toque no botão **X** agora oculta o alerta imediatamente para a passagem atual e acumula strikes persistentes em SharedPreferences; o banimento definitivo no vetor de aproximação é consumado no 3º descarte em viagens distintas. Toque longo preservado para banimento global imediato.
+- 📲 **Autostart por Bluetooth Robusto (Galaxy S25):** Correção do bloqueio indevido por desligamento anterior, matching flexível por MAC/Nome com fallback para bonded devices e inicialização via `InvisibleStartActivity` (Trampoline) contornando restrições de Background FGS do Android 8 ao 15.
+
+### [v1.2.7 (Build 9)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.7) — *Novembro 2026*
+- 🎯 **Priorização Heurística & Correção de 0 km/h:** Radares com velocidade real (> 0 km/h) e radares frontais ("Na sua via") têm prioridade sobre pontos puramente informativos. Radares de 0 km/h nunca disparam sobrevelocidade.
+- 🌓 **Modo Noturno Unificado:** Suporte global a temas (Auto/Dia/Noite) integrado às preferências e aplicado dinamicamente com `AppCompatDelegate`.
+- 📊 **Barra de Progresso de Distância:** Indicador visual de proximidade integrado no card de alerta para rápida visualização periférica ao volante.
+- 🚩 **Sinalização para Revisão (Flagging):** Botão discreto para marcar radares com inconsistências na base para exportação e análise futura.
 
 ### [v1.2.6 (Build 8)](https://github.com/jozito412/RadarLite/releases/tag/v1.2.6) — *Novembro 2026*
 - ⚡ **Rota Expressa de Devolução (Foreground Broadcast):** Emissão de `ACTION_STATE_CHANGED` com `FLAG_RECEIVER_FOREGROUND` e `FLAG_INCLUDE_STOPPED_PACKAGES`, impedindo que o SO da multimídia retenha ou descarte a confirmação de estado em filas de baixa energia.
