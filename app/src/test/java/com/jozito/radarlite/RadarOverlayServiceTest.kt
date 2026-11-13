@@ -392,10 +392,19 @@ class RadarOverlayServiceTest {
             source = "DNIT"
         )
 
-        // 1. Proximidade: distância >= 35m (aprox. 50m ao norte) -> NÃO é clone
-        val farRadar = baseRadar.copy(
+        // 1. Proximidade (Proposta 2: Raio estendido para 65 metros):
+        // Radar a ~50 metros de distância (latitude +0.00045) -> agora É CLONE
+        val mediumRadar = baseRadar.copy(
             id = 2L,
-            latitude = -25.4284 + 0.00045, // ~50 metros de distância
+            latitude = -25.4284 + 0.00045, // ~50 metros
+            longitude = -49.2733
+        )
+        assertTrue(RadarOverlayService.areClones(baseRadar, mediumRadar))
+
+        // Radar a ~83 metros de distância (latitude +0.00075) -> NÃO é clone (ultrapassa 65m)
+        val farRadar = baseRadar.copy(
+            id = 20L,
+            latitude = -25.4284 + 0.00075, // ~83 metros
             longitude = -49.2733
         )
         assertFalse(RadarOverlayService.areClones(baseRadar, farRadar))
@@ -408,13 +417,22 @@ class RadarOverlayServiceTest {
         )
         assertFalse(RadarOverlayService.areClones(baseRadar, diffSpeedRadar))
 
-        // 3. Mesmo Tipo: tipos diferentes (TRAFFIC_LIGHT vs FIXED no mesmo semáforo) -> NÃO é clone
+        // 3. Tipos Compatíveis (Proposta 2):
+        // TRAFFIC_LIGHT vs FIXED no mesmo semáforo e mesma velocidade -> É CLONE
         val diffTypeRadar = baseRadar.copy(
             id = 4L,
             latitude = -25.4284 + 0.00005,
             type = "TRAFFIC_LIGHT"
         )
-        assertFalse(RadarOverlayService.areClones(baseRadar, diffTypeRadar))
+        assertTrue(RadarOverlayService.areClones(baseRadar, diffTypeRadar))
+
+        // Tipo incompatível (PEDESTRIAN_CROSSING vs FIXED) -> NÃO é clone
+        val incompatibleTypeRadar = baseRadar.copy(
+            id = 40L,
+            latitude = -25.4284 + 0.00005,
+            type = "PEDESTRIAN_CROSSING"
+        )
+        assertFalse(RadarOverlayService.areClones(baseRadar, incompatibleTypeRadar))
 
         // 4. Conflito de Direção:
         // Caso 4a: Ambos possuem direção com diferença < 45° (90° vs 110°, diff 20°) -> É CLONE
@@ -852,6 +870,175 @@ class RadarOverlayServiceTest {
 
         // Solução 2: O radar com velocidade real (60 km/h) vence o ponto de 0 km/h mesmo estando 5m mais longe
         assertEquals(202L, sorted[0].radar.id)
+    }
+
+    @Test
+    fun testProposta2TrafficLightAndFixedMergePreservingTrafficLight() {
+        val fixedRadar = RadarEntity(
+            id = 301L,
+            latitude = -25.4284,
+            longitude = -49.2733,
+            speedLimit = 60,
+            type = "FIXED",
+            bearing = 90.0,
+            source = "DNIT"
+        )
+        val trafficLightRadar = RadarEntity(
+            id = 302L,
+            latitude = -25.4284 + 0.0002, // ~22 metros
+            longitude = -49.2733,
+            speedLimit = 60,
+            type = "TRAFFIC_LIGHT",
+            bearing = 90.0,
+            source = "OSM"
+        )
+
+        val deduplicated = RadarOverlayService.deduplicateRadars(listOf(fixedRadar, trafficLightRadar))
+        assertEquals(1, deduplicated.size)
+        // O sobrevivente é unificado com o tipo mais rico (TRAFFIC_LIGHT)
+        assertEquals("TRAFFIC_LIGHT", deduplicated[0].type)
+        assertEquals(60, deduplicated[0].speedLimit)
+    }
+
+    @Test
+    fun testProposta1ClusterDismissLogic() {
+        val radarA = RadarEntity(
+            id = 401L,
+            latitude = -25.4284,
+            longitude = -49.2733,
+            speedLimit = 60,
+            type = "FIXED"
+        )
+        val radarB = RadarEntity(
+            id = 402L,
+            latitude = -25.4284 + 0.0003, // ~33 metros de distância do radar A
+            longitude = -49.2733,
+            speedLimit = 60,
+            type = "TRAFFIC_LIGHT"
+        )
+        val radarC = RadarEntity(
+            id = 403L,
+            latitude = -25.4284 + 0.005, // ~555 metros de distância (fora do cluster)
+            longitude = -49.2733,
+            speedLimit = 80,
+            type = "FIXED"
+        )
+
+        // Simula a fila de proximidade ativa
+        val nearbyList = listOf(
+            NearbyRadar(radar = radarA, distanceMeters = 200f),
+            NearbyRadar(radar = radarB, distanceMeters = 233f),
+            NearbyRadar(radar = radarC, distanceMeters = 755f)
+        )
+
+        val dismissedIds = mutableSetOf<Long>()
+        val dismissedRadar = radarA
+
+        // Lógica da Proposta 1: descarta o radar clicado e todos no raio de 80m
+        dismissedIds.add(dismissedRadar.id)
+        val cluster = nearbyList.filter { nearby ->
+            RadarOverlayService.calculateDistanceMeters(
+                dismissedRadar.latitude, dismissedRadar.longitude,
+                nearby.radar.latitude, nearby.radar.longitude
+            ) <= RadarOverlayService.DISMISS_CLUSTER_RADIUS_METERS
+        }
+        for (nearby in cluster) {
+            dismissedIds.add(nearby.radar.id)
+        }
+
+        // Radar B (no mesmo cruzamento) deve ter sido dispensado em conjunto
+        assertTrue(dismissedIds.contains(401L))
+        assertTrue(dismissedIds.contains(402L))
+
+        // Radar C (a 555m) NÃO deve ser dispensado
+        assertFalse(dismissedIds.contains(403L))
+
+        // O próximo radar ativo na tela não será o Radar B, e sim o Radar C
+        val next = nearbyList.firstOrNull { it.radar.id !in dismissedIds }
+        assertEquals(403L, next?.radar?.id)
+    }
+
+    @Test
+    fun testCrossTrackAndAlongTrackCalculations() {
+        // Distância de 100m, exatamente à frente (0°)
+        val cross0 = RadarOverlayService.calculateCrossTrackDistanceMeters(100.0, 0f)
+        val along0 = RadarOverlayService.calculateAlongTrackDistanceMeters(100.0, 0f)
+        assertEquals(0.0, cross0, 0.001)
+        assertEquals(100.0, along0, 0.001)
+
+        // Distância de 100m com 30° à direita
+        // cross = 100 * sin(30°) = 50.0m
+        // along = 100 * cos(30°) = 86.60m
+        val cross30 = RadarOverlayService.calculateCrossTrackDistanceMeters(100.0, 30f)
+        val along30 = RadarOverlayService.calculateAlongTrackDistanceMeters(100.0, 30f)
+        assertEquals(50.0, cross30, 0.01)
+        assertEquals(86.60, along30, 0.01)
+
+        // Simetria: 30° à esquerda (-30°) resulta na mesma distância lateral positiva
+        val crossMinus30 = RadarOverlayService.calculateCrossTrackDistanceMeters(100.0, -30f)
+        assertEquals(50.0, crossMinus30, 0.01)
+    }
+
+    @Test
+    fun testCorridorWidthThresholds() {
+        // Distância próxima (<= 100m) -> 28m rígido (protege contra marginais a 30m ou transversais)
+        assertEquals(28.0, RadarOverlayService.getMaxCorridorWidthMeters(50.0), 0.001)
+        assertEquals(28.0, RadarOverlayService.getMaxCorridorWidthMeters(100.0), 0.001)
+
+        // Distância intermediária (175m) -> expande suavemente
+        assertTrue(RadarOverlayService.getMaxCorridorWidthMeters(175.0) in 28.0..50.0)
+
+        // Rodovia distante (> 250m) -> 75m para cobrir curvas longas
+        assertEquals(75.0, RadarOverlayService.getMaxCorridorWidthMeters(300.0), 0.001)
+    }
+
+    @Test
+    fun testKinematicScoreHighwayExpressVersusMarginal() {
+        // Veículo a 95 km/h na rodovia expressa
+        val speedKmh = 95f
+
+        // Radar A: Via expressa (100 km/h), centralizado (crossTrack = 5m), 150m à frente
+        val expressRadar = NearbyRadar(
+            radar = RadarEntity(id = 501L, latitude = -25.0, longitude = -49.0, speedLimit = 100, type = "FIXED"),
+            distanceMeters = 150f,
+            crossTrackDistanceMeters = 5.0
+        )
+
+        // Radar B: Pista marginal (40 km/h), deslocado lateralmente (crossTrack = 25m), 140m à frente
+        val marginalRadar = NearbyRadar(
+            radar = RadarEntity(id = 502L, latitude = -25.0, longitude = -49.0, speedLimit = 40, type = "FIXED"),
+            distanceMeters = 140f,
+            crossTrackDistanceMeters = 25.0
+        )
+
+        val scoreExpress = RadarOverlayService.calculateKinematicScore(expressRadar, speedKmh)
+        val scoreMarginal = RadarOverlayService.calculateKinematicScore(marginalRadar, speedKmh)
+
+        // O radar da via expressa DEVE vencer com ampla margem, impedindo alarme falso de 40 km/h
+        assertTrue(scoreExpress > scoreMarginal)
+        assertTrue(scoreExpress - scoreMarginal > 500.0)
+    }
+
+    @Test
+    fun testRoadSpeedManagerCsvParsingAndMatching() {
+        val manager = com.jozito.radarlite.data.RoadSpeedManager()
+        val csvData = """
+            lat,lng,limit_kmh,source,estimated,limit_low_kmh,direction_deg
+            -26.610445,-51.484870,40,OSM:class,1,40,90
+            -26.610278,-51.480105,100,OSM:class,1,80,90
+        """.trimIndent()
+
+        val count = manager.loadCsv(csvData.byteInputStream())
+        assertEquals(2, count)
+
+        // Busca pela coordenada próxima ao ponto de 100 km/h no mesmo sentido (90°)
+        val matched = manager.findMatchingRoadSpeed(
+            vehicleLat = -26.610280,
+            vehicleLon = -51.480100,
+            vehicleBearing = 90f
+        )
+        assertTrue(matched != null)
+        assertEquals(100, matched?.speedLimit)
     }
 }
 

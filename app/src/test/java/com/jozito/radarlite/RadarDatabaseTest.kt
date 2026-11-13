@@ -1,6 +1,8 @@
 package com.jozito.radarlite
 
 import com.jozito.radarlite.data.RadarEntity
+import com.jozito.radarlite.data.toPoint
+import com.jozito.radarlite.data.toEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -70,5 +72,45 @@ class RadarDatabaseTest {
         // Radar a 50 km de distância deve estar fora
         val radarFarLat = lat + (50000.0 / 111320.0)
         assert(radarFarLat !in minLat..maxLat)
+    }
+
+    @Test
+    fun testRoadSpeedEntityCreationAndStatePartition() {
+        val entity = com.jozito.radarlite.data.RoadSpeedEntity(
+            id = 1L,
+            latitude = -26.610278,
+            longitude = -51.480105,
+            speedLimit = 100,
+            source = "OSM:class",
+            isEstimated = true,
+            speedLimitLow = 80,
+            bearing = 90.0,
+            state = "PR"
+        )
+
+        assertEquals(1L, entity.id)
+        assertEquals(-26.610278, entity.latitude, 0.00001)
+        assertEquals(-51.480105, entity.longitude, 0.00001)
+        assertEquals(100, entity.speedLimit)
+        assertEquals("OSM:class", entity.source)
+        assertEquals(true, entity.isEstimated)
+        assertEquals(80, entity.speedLimitLow)
+        assertEquals(90.0, entity.bearing!!, 0.01)
+        assertEquals("PR", entity.state)
+
+        // Conversão de/para RoadSpeedPoint
+        val point = entity.toPoint()
+        assertEquals(entity.latitude, point.latitude, 0.00001)
+        assertEquals(entity.speedLimit, point.speedLimit)
+
+        val backToEntity = point.toEntity(state = "PR")
+        assertEquals(entity.state, backToEntity.state)
+    }
+
+    @Test
+    fun testSupportedStatesList() {
+        val states = com.jozito.radarlite.data.RadarDatabase.SUPPORTED_STATES
+        assertEquals(4, states.size)
+        assertEquals(listOf("PR", "SC", "SP", "MS"), states)
     }
 }

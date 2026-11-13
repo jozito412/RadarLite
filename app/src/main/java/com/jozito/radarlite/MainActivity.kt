@@ -1399,7 +1399,7 @@ fun RadarLiteApp(
                                     isSyncing = true
                                     syncStatusText = "Conectando ao GitHub..."
                                     val db = RadarDatabase.getDatabase(context)
-                                    val syncManager = RadarSyncManager(context, db.radarDao())
+                                    val syncManager = RadarSyncManager(context, db.radarDao(), db.roadSpeedDao())
                                     val result = syncManager.syncRadars { state, count ->
                                         syncStatusText = "Baixando estado $state ($count radares)..."
                                     }
@@ -1445,6 +1445,43 @@ fun RadarLiteApp(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            if (!isSyncing) {
+                                coroutineScope.launch {
+                                    isSyncing = true
+                                    syncStatusText = "Conectando ao GitHub (Limites de Vias)..."
+                                    val db = RadarDatabase.getDatabase(context)
+                                    val syncManager = RadarSyncManager(context, db.radarDao(), db.roadSpeedDao())
+                                    val result = syncManager.syncRoadSpeeds { state, count ->
+                                        syncStatusText = "Baixando vias do $state ($count pontos)..."
+                                    }
+                                    isSyncing = false
+                                    if (result.isSuccess) {
+                                        syncSavedCount = result.totalRadarsSaved
+                                        showSyncSuccessDialog = true
+                                    } else {
+                                        syncErrorMessage = result.errorMessage
+                                        showSyncErrorDialog = true
+                                    }
+                                }
+                            }
+                        },
+                        enabled = !isSyncing,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text(
+                            text = "Atualizar Limites de Vias (4 Estados)",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
 
                     if (isSyncing) {
@@ -1978,12 +2015,28 @@ fun RadarLiteApp(
                         Spacer(modifier = Modifier.height(10.dp))
                     }
 
+                    // Versão 1.2.9
+                    item {
+                        ChangelogVersionCard(
+                            version = "v1.2.9",
+                            buildNumber = "Build 11",
+                            isLatest = true,
+                            date = "Novembro 2026",
+                            items = listOf(
+                                "🛣️ Limites de Vias Offline (PR, SC, SP, MS): Mais de 850 mil pontos de velocidade empacotados no app com streaming de baixa memória e atualização sob demanda via GitHub.",
+                                "🎯 Heurística Cinemática & Corredor Lateral: Diferenciação automática entre pistas expressas e marginais paralelas, e eliminação de radares de cruzamentos ortogonais (>30°).",
+                                "🔄 Deduplicação & Descarte em Cluster: Fusão inteligente de radares duplicados (65m), silenciamento em cluster (80m) ao fechar o card e propagação de banimento para todos os clones do ponto."
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
                     // Versão 1.2.8
                     item {
                         ChangelogVersionCard(
                             version = "v1.2.8",
                             buildNumber = "Build 10",
-                            isLatest = true,
+                            isLatest = false,
                             date = "Novembro 2026",
                             items = listOf(
                                 "📡 Gestão Aprimorada de Sinal GPS: Ocultação rápida do aviso de perda de sinal (3.5s), novo aviso de 'Sinal GPS Recuperado' ao restabelecer conexão e cooldown de 3 minutos para evitar mensagens repetitivas.",

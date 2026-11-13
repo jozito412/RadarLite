@@ -110,6 +110,10 @@ import com.jozito.radarlite.data.PreferencesManager
 import com.jozito.radarlite.data.RadarDao
 import com.jozito.radarlite.data.RadarDatabase
 import com.jozito.radarlite.data.RadarEntity
+import com.jozito.radarlite.data.RoadSpeedDao
+import com.jozito.radarlite.data.RoadSpeedEntity
+import com.jozito.radarlite.data.RoadSpeedManager
+import com.jozito.radarlite.data.toPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -128,7 +132,8 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Radar próximo identificado com cálculo de distância, tempo de colisão (TTC) e alcance de alerta configurado.
+ * Radar próximo identificado com cálculo de distância, tempo de colisão (TTC),
+ * alcance de alerta configurado e desvio lateral perpendicular (Cross-Track Distance).
  */
 data class NearbyRadar(
     val radar: RadarEntity,
@@ -136,7 +141,9 @@ data class NearbyRadar(
     val alertDistanceMeters: Float = 500f,
     val timeToCollisionSec: Double = 0.0,
     val isAggressiveAlert: Boolean = false,
-    val relativeAngleDeg: Float = 0f
+    val relativeAngleDeg: Float = 0f,
+    val crossTrackDistanceMeters: Double = 0.0,
+    val alongTrackDistanceMeters: Double = 0.0
 )
 
 /**
@@ -160,7 +167,11 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
     private lateinit var radarDao: RadarDao
+    private lateinit var roadSpeedDao: RoadSpeedDao
     private lateinit var preferencesManager: PreferencesManager
+
+    // Gerenciador em memória da base de velocidades regulamentadas das vias (Desafio 1 - Proposta 2)
+    val roadSpeedManager = com.jozito.radarlite.data.RoadSpeedManager()
 
     // WindowManager e ComposeView do Overlay
     private var windowManager: WindowManager? = null
@@ -176,17 +187,61 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
     /**
      * Oculta temporariamente o alerta do radar naquele instante sem enviá-lo para a blacklist.
-     * O radar voltará a alertar normalmente em viagens futuras ou após o veículo se afastar.
+     * Aplica o Descarte por Cluster Geográfico (Proposta 1): ao dispensar um radar, oculta
+     * também todos os radares pertencentes ao mesmo ponto físico (raio de até DISMISS_CLUSTER_RADIUS_METERS),
+     * prevenindo que um clone ou sensor adjacente reapareça imediatamente na tela.
      */
     fun dismissRadarTemporarily(radarId: Long, showToast: Boolean = true) {
         temporarilyDismissedRadarIds.add(radarId)
-        if (_closestRadar.value?.radar?.id == radarId) {
+
+        // Localiza o radar sendo dispensado para identificar o ponto geográfico de referência
+        val dismissedRadar = _closestRadar.value?.radar?.takeIf { it.id == radarId }
+            ?: _nearbyRadars.value.firstOrNull { it.radar.id == radarId }?.radar
+            ?: cachedRadars.firstOrNull { it.id == radarId }
+
+        if (dismissedRadar != null) {
+            // Cluster Dismiss: adiciona todos os radares pertencentes ao mesmo ponto físico
+            // 1. A partir dos alertas ativos na tela (_nearbyRadars)
+            val clusterFromNearby = _nearbyRadars.value.filter { nearby ->
+                nearby.radar.id == dismissedRadar.id || calculateDistanceMeters(
+                    dismissedRadar.latitude, dismissedRadar.longitude,
+                    nearby.radar.latitude, nearby.radar.longitude
+                ) <= DISMISS_CLUSTER_RADIUS_METERS
+            }
+            for (nearby in clusterFromNearby) {
+                temporarilyDismissedRadarIds.add(nearby.radar.id)
+            }
+
+            // 2. A partir do cache espacial em memória (cachedRadars)
+            val clusterFromCache = cachedRadars.filter { candidate ->
+                candidate.id == dismissedRadar.id || calculateDistanceMeters(
+                    dismissedRadar.latitude, dismissedRadar.longitude,
+                    candidate.latitude, candidate.longitude
+                ) <= DISMISS_CLUSTER_RADIUS_METERS
+            }
+            for (candidate in clusterFromCache) {
+                temporarilyDismissedRadarIds.add(candidate.id)
+            }
+        }
+
+        // Se o radar atual na tela foi dispensado (ou faz parte do cluster dispensado),
+        // busca o próximo radar que NÃO faça parte do cluster. Se não houver, fecha o card.
+        val currentClosestId = _closestRadar.value?.radar?.id
+        if (currentClosestId == null || currentClosestId == radarId || temporarilyDismissedRadarIds.contains(currentClosestId)) {
             val next = _nearbyRadars.value.firstOrNull { it.radar.id !in temporarilyDismissedRadarIds }
             _closestRadar.value = next
         }
         if (showToast) {
             Toast.makeText(applicationContext, "Alerta ocultado", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    fun isTemporarilyDismissed(radarId: Long): Boolean {
+        return temporarilyDismissedRadarIds.contains(radarId)
+    }
+
+    fun clearTemporarilyDismissedRadars() {
+        temporarilyDismissedRadarIds.clear()
     }
 
     /**
@@ -352,9 +407,10 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         const val CACHE_RADIUS_METERS = 15_000.0 // 15 km
         const val CACHE_EXPIRATION_DISTANCE_METERS = 3_000f // 3 km (margem segura de revalidação)
 
-        // Constantes de Deduplicação em RAM (Fase 10)
-        const val DEDUPLICATION_RADIUS_METERS = 35.0
+        // Constantes de Deduplicação em RAM (Fase 10 + Proposta 2)
+        const val DEDUPLICATION_RADIUS_METERS = 65.0
         const val DEDUPLICATION_DIRECTION_CONFLICT_DEGREES = 45.0
+        const val DISMISS_CLUSTER_RADIUS_METERS = 80.0
 
         // Constante de Tolerância do Cone de Bloqueio da Blacklist Vetorial (Fase 9.2)
         const val BLACKLIST_CONE_TOLERANCE_DEGREES = 60.0
@@ -855,6 +911,109 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         }
 
         /**
+         * Calcula a distância lateral perpendicular (Cross-Track Distance em metros)
+         * entre o ponto do radar e a linha central de trajetória projetada do veículo (Desafio 1 - Proposta 3).
+         *
+         * - 0 a 15m: O radar está na mesma via/faixa de rodagem ou no acostamento imediato.
+         * - > 25m: O radar está localizado em pista marginal paralela ou em via transversal distante.
+         */
+        fun calculateCrossTrackDistanceMeters(distanceMeters: Double, relativeAngleDeg: Float): Double {
+            val rad = Math.toRadians(relativeAngleDeg.toDouble())
+            return abs(distanceMeters * sin(rad))
+        }
+
+        /**
+         * Calcula a distância longitudinal à frente (Along-Track Distance em metros)
+         * projetada sobre o vetor de deslocamento do veículo.
+         */
+        fun calculateAlongTrackDistanceMeters(distanceMeters: Double, relativeAngleDeg: Float): Double {
+            val rad = Math.toRadians(relativeAngleDeg.toDouble())
+            return distanceMeters * cos(rad)
+        }
+
+        /**
+         * Retorna a largura máxima do corredor viário admissível para alerta (Desafio 1 - Proposta 3 Geral):
+         * - Próximo (<= 100m): 28 metros (filtra marginais paralelas e postes de transversais).
+         * - Médio (100m a 250m): 28m a 50m (permite curvas urbanas de raio médio).
+         * - Longo (> 250m): 75 metros (permite aproximações em curvas longas de rodovia).
+         */
+        fun getMaxCorridorWidthMeters(distanceMeters: Double): Double {
+            return when {
+                distanceMeters <= 100.0 -> 28.0
+                distanceMeters <= 250.0 -> 28.0 + (distanceMeters - 100.0) * (22.0 / 150.0)
+                else -> 75.0
+            }
+        }
+
+        /**
+         * Calcula o score de coerência cinemática e alinhamento viário (Desafio 1 - Propostas 1 & 3):
+         * 1. Desvio lateral (cross-track): radares centralizados na trajetória ganham preferência.
+         * 2. Coerência de velocidade: em alta velocidade (>= 70 km/h), radares de via lenta/marginal (<= 50 km/h)
+         *    são fortemente penalizados para proteger contra alarmes falsos de marginais coladas à via expressa.
+         * 3. Confirmação por Base de Velocidade da Via (se disponível via RoadSpeedManager): se o radar coincidir
+         *    com a velocidade da via detectada, recebe um bônus substancial.
+         * 4. Distância física: menor distância desempata radares da mesma via.
+         */
+        fun calculateKinematicScore(
+            nearby: NearbyRadar,
+            currentSpeedKmh: Float,
+            roadSpeedLimit: Int? = null
+        ): Double {
+            var score = 1000.0
+
+            // 1. Penalidade por Desvio Lateral Perpendicular (Cross-Track)
+            score -= nearby.crossTrackDistanceMeters * 5.0
+
+            // 2. Coerência Cinemática entre a velocidade real do carro e o limite do radar
+            val radarLimit = nearby.radar.speedLimit
+            if (radarLimit > 0 && currentSpeedKmh >= 5.0f) {
+                if (currentSpeedKmh >= 70.0f) {
+                    // Carro em velocidade de rodovia/via expressa (>= 70 km/h):
+                    // Se o radar for de via marginal (<= 50 km/h), sofre pesada penalização cinemática
+                    if (radarLimit <= 50) {
+                        val excess = currentSpeedKmh - radarLimit
+                        score -= excess * 15.0
+                    } else {
+                        score += 200.0
+                    }
+                } else if (currentSpeedKmh <= 60.0f) {
+                    // Carro em velocidade urbana/marginal (<= 60 km/h):
+                    // Favorece o limite de velocidade urbano
+                    if (radarLimit in 30..60) {
+                        score += 100.0
+                    }
+                }
+            }
+
+            // 3. Casamento com a Base de Velocidade da Via (Desafio 1 - Proposta 2)
+            if (roadSpeedLimit != null && roadSpeedLimit > 0 && radarLimit > 0) {
+                if (radarLimit == roadSpeedLimit) {
+                    score += 300.0 // Alinhamento perfeito com a velocidade da via
+                } else if (abs(radarLimit - roadSpeedLimit) <= 10) {
+                    score += 100.0
+                }
+            }
+
+            // 4. Distância física: proximidade
+            score -= nearby.distanceMeters * 0.5
+
+            return score
+        }
+
+        /**
+         * Identifica se dois tipos de radar são compatíveis para fins de fusão/deduplicação.
+         * Ex: FIXED, TRAFFIC_LIGHT e RADAR no mesmo ponto físico e velocidade representam
+         * a mesma infraestrutura de fiscalização.
+         */
+        fun areCompatibleTypes(typeA: String, typeB: String): Boolean {
+            val tA = typeA.trim().uppercase()
+            val tB = typeB.trim().uppercase()
+            if (tA == tB) return true
+            val speedCameraTypes = setOf("FIXED", "TRAFFIC_LIGHT", "RADAR")
+            return tA in speedCameraTypes && tB in speedCameraTypes
+        }
+
+        /**
          * Conflito de Direção (Fase 10):
          * - Se ambos possuem direction_deg: a diferença angular entre eles é menor que 45 graus.
          * - Se um ou ambos NÃO possuem direction_deg: são considerados clones (pois o ponto sem direção
@@ -869,25 +1028,25 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         }
 
         /**
-         * Identifica se um radar B é considerado clone de um radar A (Fase 10).
+         * Identifica se um radar B é considerado clone de um radar A (Fase 10 + Proposta 2).
          * Atende a todas as condições simultaneamente:
-         * 1. Proximidade: Distância entre eles é menor que 35 metros (< 35.0).
-         * 2. Mesma Regra: Possuem o mesmo limit_kmh (speedLimit).
-         * 3. Mesmo Tipo: Possuem o mesmo kind (type, ex: ambos FIXED ou ambos TRAFFIC_LIGHT).
+         * 1. Proximidade: Distância entre eles é menor que 65 metros (< 65.0).
+         * 2. Mesma Regra: Possuem o mesmo limit_kmh (speedLimit) ou um deles é 0 km/h.
+         * 3. Tipos Compatíveis: FIXED e TRAFFIC_LIGHT com mesma velocidade são fundidos.
          * 4. Conflito de Direção: ambos com direção dif < 45°, ou pelo menos um sem direção.
          */
         fun areClones(a: RadarEntity, b: RadarEntity): Boolean {
             // Bounding box prévio para alta performance antes do cálculo trigonométrico
             val latDiff = abs(a.latitude - b.latitude)
-            if (latDiff > 0.0005) {
+            if (latDiff > 0.001) {
                 return false
             }
             val lonDiff = abs(a.longitude - b.longitude)
-            if (lonDiff > 0.0006) {
+            if (lonDiff > 0.0012) {
                 return false
             }
 
-            // 1. Proximidade: distância < 35 metros
+            // 1. Proximidade: distância < 65 metros
             val distance = calculateDistanceMeters(a.latitude, a.longitude, b.latitude, b.longitude)
             if (distance >= DEDUPLICATION_RADIUS_METERS) {
                 return false
@@ -898,7 +1057,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                 return false
             }
 
-            // 2. Mesma Regra / Subsunção de Pontos 0 km/h (Solução 1):
+            // 2. Mesma Regra / Subsunção de Pontos 0 km/h:
             // - Se ambos possuem velocidades válidas distintas (> 0), NÃO são clones (salva marginais coladas em vias expressas).
             if (a.speedLimit > 0 && b.speedLimit > 0 && a.speedLimit != b.speedLimit) {
                 return false
@@ -910,8 +1069,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                 return true
             }
 
-            // 3. Mesmo Tipo: para radares com a mesma velocidade, exige mesmo tipo
-            return a.type.trim().equals(b.type.trim(), ignoreCase = true)
+            // 3. Tipos compatíveis: para radares com a mesma velocidade, mescla tipos compatíveis (ex: FIXED e TRAFFIC_LIGHT)
+            return areCompatibleTypes(a.type, b.type)
         }
 
         /**
@@ -924,7 +1083,8 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
          * - Prioridade 1: Radares com medição de velocidade real (> 0 km/h) sempre vencem pontos 0 km/h (Solução 1).
          * - Prioridade 2: Ao encontrar clones, mantenha na lista o radar que tiver a coluna direction_deg preenchida
          *   (pois ele permite o cálculo preciso do cone de visão para evitar falsos positivos nas ruas transversais).
-         * - Prioridade 3: Se nenhum dos clones tiver direção, priorize o que tiver o source com o caractere '+' (dados enriquecidos).
+         * - Prioridade 3: Prioriza TRAFFIC_LIGHT sobre FIXED para maior riqueza de contexto visual na interface.
+         * - Prioridade 4: Se nenhum dos clones tiver direção, priorize o que tiver o source com o caractere '+' (dados enriquecidos).
          * - Em caso de empate total, mantenha o primeiro.
          */
         fun deduplicateRadars(radars: List<RadarEntity>): List<RadarEntity> {
@@ -942,6 +1102,13 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                 val bHasBearing = b.value.bearing != null
                 if (aHasBearing != bHasBearing) {
                     return@sortedWith if (aHasBearing) -1 else 1
+                }
+
+                // Prioridade de tipo visualmente informativo (TRAFFIC_LIGHT > FIXED)
+                val aIsTraffic = a.value.type.contains("TRAFFIC", ignoreCase = true)
+                val bIsTraffic = b.value.type.contains("TRAFFIC", ignoreCase = true)
+                if (aIsTraffic != bIsTraffic) {
+                    return@sortedWith if (aIsTraffic) -1 else 1
                 }
 
                 val aHasPlus = a.value.source?.contains("+") == true
@@ -996,7 +1163,9 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         savedStateRegistryController.performRestore(null)
 
         preferencesManager = PreferencesManager.getInstance(applicationContext)
-        radarDao = RadarDatabase.getDatabase(applicationContext).radarDao()
+        val database = RadarDatabase.getDatabase(applicationContext)
+        radarDao = database.radarDao()
+        roadSpeedDao = database.roadSpeedDao()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         _isNightMode.value = preferencesManager.isNightModeEnabled
         _isHudMode.value = preferencesManager.isHudModeEnabled
@@ -1171,23 +1340,42 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
      * - Passagem 2: Na próxima vez que o usuário passar pelo radar, registra Strike 2 ("Strike 2 de 3: Alerta ocultado. Mais 1 descarte para banir.").
      * - Passagem 3: Na 3ª vez, executa o banimento efetivo no vetor direcional ("Strike 3 de 3: Radar banido no sentido ~XXº!").
      * - global == true (Toque Longo / Long Press): Executa o banimento global imediato intencional em todas as direções.
+     * - Propagação ao Cluster (Proposta 3): replica strikes, bans e flags a todos os radares pertencentes
+     *   ao mesmo ponto físico (raio de 65m e mesma direção), silenciando múltiplos registros redundantes juntos.
      */
     fun banCurrentRadar(global: Boolean = false) {
         val currentNearby = _closestRadar.value ?: return
-        val radarId = currentNearby.radar.id
+        val primaryRadar = currentNearby.radar
+        val radarId = primaryRadar.id
+
+        // Proposta 3: Localiza todos os radares pertencentes ao mesmo cluster geográfico ativo
+        val pool = cachedRadars.ifEmpty { _nearbyRadars.value.map { it.radar } }
+        val clusterRadars = pool.filter { candidate ->
+            candidate.id == primaryRadar.id || (
+                calculateDistanceMeters(primaryRadar.latitude, primaryRadar.longitude, candidate.latitude, candidate.longitude) <= DEDUPLICATION_RADIUS_METERS &&
+                hasDirectionConflict(primaryRadar.bearing, candidate.bearing)
+            )
+        }.ifEmpty { listOf(primaryRadar) }
 
         if (global) {
-            preferencesManager.banRadarGlobally(radarId)
-            preferencesManager.clearBanStrikes(radarId)
-            banStrikesMap.remove(radarId)
+            for (radar in clusterRadars) {
+                preferencesManager.banRadarGlobally(radar.id)
+                preferencesManager.clearBanStrikes(radar.id)
+                banStrikesMap.remove(radar.id)
+            }
             Toast.makeText(this@RadarOverlayService, "Radar banido em TODAS as direções", Toast.LENGTH_SHORT).show()
-            Log.i(TAG, "Radar $radarId banido GLOBALMENTE via banCurrentRadar(global = true). Janela flutuante apagada instantaneamente.")
+            Log.i(TAG, "Cluster de ${clusterRadars.size} radar(es) (ID base: $radarId) banido GLOBALMENTE via banCurrentRadar(global = true). Janela flutuante apagada instantaneamente.")
             dismissRadarTemporarily(radarId, showToast = false)
             return
         }
 
-        // Sistema 3-Strikes persistente entre passagens diferentes
+        // Sistema 3-Strikes persistente entre passagens diferentes (propagado a todo o cluster)
         val strikes = preferencesManager.recordBanStrike(radarId)
+        for (radar in clusterRadars) {
+            if (radar.id != radarId) {
+                preferencesManager.setBanStrikes(radar.id, strikes)
+            }
+        }
         dismissRadarTemporarily(radarId, showToast = false)
 
         when (strikes) {
@@ -1197,7 +1385,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                     "Strike 1 de 3: Alerta ocultado. Mais 2 descartes para banir.",
                     Toast.LENGTH_LONG
                 ).show()
-                Log.i(TAG, "Strike 1 registrado para radar $radarId. Alerta ocultado nesta passagem.")
+                Log.i(TAG, "Strike 1 registrado para cluster de ${clusterRadars.size} radar(es) (base: $radarId). Alerta ocultado nesta passagem.")
             }
             2 -> {
                 Toast.makeText(
@@ -1205,60 +1393,91 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                     "Strike 2 de 3: Alerta ocultado. Mais 1 descarte para banir.",
                     Toast.LENGTH_LONG
                 ).show()
-                Log.i(TAG, "Strike 2 registrado para radar $radarId. Alerta ocultado nesta passagem.")
+                Log.i(TAG, "Strike 2 registrado para cluster de ${clusterRadars.size} radar(es) (base: $radarId). Alerta ocultado nesta passagem.")
             }
             else -> {
-                preferencesManager.clearBanStrikes(radarId)
-                banStrikesMap.remove(radarId)
                 val currentBearing = lastValidBearing ?: _currentLocation.value?.let { loc ->
                     if (loc.hasBearing() && loc.bearing != 0.0f) loc.bearing else null
                 } ?: 0.0f
                 val normBearing = ((currentBearing.roundToInt() % 360) + 360) % 360
-                preferencesManager.banApproach(radarId, normBearing.toDouble())
+
+                for (radar in clusterRadars) {
+                    preferencesManager.clearBanStrikes(radar.id)
+                    banStrikesMap.remove(radar.id)
+                    preferencesManager.banApproach(radar.id, normBearing.toDouble())
+                }
                 Toast.makeText(
                     this@RadarOverlayService,
                     "Strike 3 de 3: Radar banido no sentido ~${normBearing}º!",
                     Toast.LENGTH_LONG
                 ).show()
-                Log.i(TAG, "Radar $radarId banido permanentemente após 3 strikes no vetor direcional $normBearing°.")
+                Log.i(TAG, "Cluster de ${clusterRadars.size} radar(es) (base: $radarId) banido permanentemente após 3 strikes no vetor direcional $normBearing°.")
             }
         }
     }
 
     /**
-     * Marca o radar ativo atual para revisão / correção de base de dados (Flagging).
+     * Marca o radar ativo atual (e clones do mesmo cluster) para revisão / correção de base de dados (Flagging).
      */
     fun flagCurrentRadarForReview() {
         val currentNearby = _closestRadar.value ?: return
-        val radarId = currentNearby.radar.id
-        preferencesManager.flagRadarForReview(radarId)
+        val primaryRadar = currentNearby.radar
+        val pool = cachedRadars.ifEmpty { _nearbyRadars.value.map { it.radar } }
+        val clusterRadars = pool.filter { candidate ->
+            candidate.id == primaryRadar.id || (
+                calculateDistanceMeters(primaryRadar.latitude, primaryRadar.longitude, candidate.latitude, candidate.longitude) <= DEDUPLICATION_RADIUS_METERS &&
+                hasDirectionConflict(primaryRadar.bearing, candidate.bearing)
+            )
+        }.ifEmpty { listOf(primaryRadar) }
+
+        for (radar in clusterRadars) {
+            preferencesManager.flagRadarForReview(radar.id)
+        }
         Toast.makeText(this@RadarOverlayService, "Radar marcado para revisão", Toast.LENGTH_SHORT).show()
-        Log.i(TAG, "Radar $radarId marcado para revisão de base de dados (flagged_for_review).")
+        Log.i(TAG, "Cluster de ${clusterRadars.size} radar(es) (base: ${primaryRadar.id}) marcado para revisão de base de dados (flagged_for_review).")
     }
 
     /**
      * Adiciona o radar com seu vetor ou globalmente à Blacklist local e remove imediatamente o alerta da tela (Fase 9.3).
+     * Propaga o bloqueio aos radares do mesmo cluster no mesmo sentido de via (Proposta 3).
      */
     fun blacklistRadar(radarId: Long, bearing: Float? = null, global: Boolean = false) {
+        val primaryRadar = cachedRadars.firstOrNull { it.id == radarId }
+            ?: _closestRadar.value?.radar?.takeIf { it.id == radarId }
+            ?: _nearbyRadars.value.firstOrNull { it.radar.id == radarId }?.radar
+        val pool = cachedRadars.ifEmpty { _nearbyRadars.value.map { it.radar } }
+        val clusterRadars = if (primaryRadar != null) {
+            pool.filter { candidate ->
+                candidate.id == primaryRadar.id || (
+                    calculateDistanceMeters(primaryRadar.latitude, primaryRadar.longitude, candidate.latitude, candidate.longitude) <= DEDUPLICATION_RADIUS_METERS &&
+                    hasDirectionConflict(primaryRadar.bearing, candidate.bearing)
+                )
+            }.ifEmpty { listOf(primaryRadar) }
+        } else {
+            emptyList()
+        }
+
         if (global) {
             preferencesManager.banRadarGlobally(radarId)
+            for (radar in clusterRadars) {
+                preferencesManager.banRadarGlobally(radar.id)
+            }
             Toast.makeText(this@RadarOverlayService, "Radar banido em TODAS as direções", Toast.LENGTH_SHORT).show()
-            Log.i(TAG, "Radar $radarId banido GLOBALMENTE.")
+            Log.i(TAG, "Radar $radarId e cluster de ${clusterRadars.size} radares banidos GLOBALMENTE.")
         } else {
             val currentBearing = bearing ?: lastValidBearing ?: _currentLocation.value?.let { loc ->
                 if (loc.hasBearing() && loc.bearing != 0.0f) loc.bearing else null
             } ?: 0.0f
             val normBearing = ((currentBearing.roundToInt() % 360) + 360) % 360
             preferencesManager.banApproach(radarId, normBearing.toDouble())
+            for (radar in clusterRadars) {
+                preferencesManager.banApproach(radar.id, normBearing.toDouble())
+            }
             Toast.makeText(this@RadarOverlayService, "Radar banido no vetor ~${normBearing}º", Toast.LENGTH_SHORT).show()
-            Log.i(TAG, "Radar $radarId banido no vetor direcional $normBearing°.")
+            Log.i(TAG, "Radar $radarId e cluster de ${clusterRadars.size} radares banidos no vetor $normBearing°.")
         }
 
-        val updatedNearby = _nearbyRadars.value.filter { it.radar.id != radarId }
-        _nearbyRadars.value = updatedNearby
-        val newClosest = updatedNearby.firstOrNull()
-        _closestRadar.value = newClosest
-        _closestRadarAlertDistance.value = newClosest?.alertDistanceMeters ?: PreferencesManager.DEFAULT_DIST_HIGHWAY.toFloat()
+        dismissRadarTemporarily(radarId, showToast = false)
     }
 
     /**
@@ -2660,6 +2879,27 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
             )
             // Fase 10: Deduplicação Direcional e Heurística de Tipo/Velocidade em RAM
             cachedRadars = deduplicateRadars(rawRadars)
+
+            // Desafio 1 - Proposta 2: Atualiza o cache espacial de velocidades das vias em RAM
+            if (::roadSpeedDao.isInitialized) {
+                try {
+                    val roadSpeeds = roadSpeedDao.getRoadSpeedsWithinRadius(
+                        latitude = location.latitude,
+                        longitude = location.longitude,
+                        radiusInMeters = CACHE_RADIUS_METERS
+                    )
+                    roadSpeedManager.clear()
+                    for (rs in roadSpeeds) {
+                        roadSpeedManager.addPoint(rs.toPoint())
+                    }
+                    if (roadSpeeds.isNotEmpty()) {
+                        Log.d(TAG, "Cache de velocidades das vias atualizado com ${roadSpeeds.size} pontos (raio 15 km).")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Aviso ao carregar cache de velocidades das vias", e)
+                }
+            }
+
             lastQueryLocation = Location(location)
             Log.d(TAG, "Cache espacial atualizado com ${cachedRadars.size} radares (após deduplicação de ${rawRadars.size} brutos).")
         }
@@ -2742,6 +2982,15 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         // Curva de tempo variável: mais segundos na rodovia, menos na cidade
         val dynamicAlertLimit = calculateDynamicAlertLimit(speedKmh, baseAlertTime)
 
+        // Desafio 1 - Proposta 2: Identifica a velocidade regulamentada da via atual (se disponível na base)
+        val currentRoadSpeedLimit = effectiveVehicleBearing?.let { bearing ->
+            roadSpeedManager.findMatchingRoadSpeed(
+                vehicleLat = location.latitude,
+                vehicleLon = location.longitude,
+                vehicleBearing = bearing
+            )?.speedLimit
+        }
+
         // Caching Espacial em RAM (Anti-Superaquecimento): itera apenas sobre cachedRadars
         val candidates = getOrUpdateCachedRadars(location)
 
@@ -2802,10 +3051,21 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                         val isPositiveProjection = isMovingTowardsRadar(heading, bearingToRadar)
 
                         if (isPositiveProjection) {
+                            val relativeAngle = calculateRelativeBearing(heading, bearingToRadar)
+                            val crossTrackDist = calculateCrossTrackDistanceMeters(distanceMeters.toDouble(), relativeAngle)
+                            val alongTrackDist = calculateAlongTrackDistanceMeters(distanceMeters.toDouble(), relativeAngle)
+
+                            // Desafio 1 - Proposta 3 Geral: Filtro de Corredor Viário por Desvio Lateral (Cross-Track)
+                            // Se o veículo estiver em movimento (>= 5 km/h) e o desvio lateral exceder o corredor da via,
+                            // o radar está numa via marginal paralela, alça de acesso ou transversal fora da via do motorista.
+                            val maxCorridor = getMaxCorridorWidthMeters(distanceMeters.toDouble())
+                            if (speedKmh >= 5.0f && crossTrackDist > maxCorridor) {
+                                continue
+                            }
+
                             // Registra/atualiza a menor distância no histórico de aproximação
                             radarDistanceHistory[radar.id] = distanceMeters
 
-                            val relativeAngle = calculateRelativeBearing(heading, bearingToRadar)
                             // Solução 3: Blindagem - radar com 0 km/h nunca entra em excesso de velocidade agressivo
                             val isOverSpeed = radar.speedLimit > 0 && speedKmh > radar.speedLimit
                             val isAggressive = isOverSpeed && (timeToCollision <= aggressiveAlertTime.toDouble())
@@ -2817,7 +3077,9 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                                     alertDistanceMeters = alertDist,
                                     timeToCollisionSec = timeToCollision.toDouble(),
                                     isAggressiveAlert = isAggressive,
-                                    relativeAngleDeg = relativeAngle
+                                    relativeAngleDeg = relativeAngle,
+                                    crossTrackDistanceMeters = crossTrackDist,
+                                    alongTrackDistanceMeters = alongTrackDist
                                 )
                             )
 
@@ -2855,13 +3117,14 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
         val candidateIds = candidates.map { it.id }.toSet()
         temporarilyDismissedRadarIds.retainAll(candidateIds)
 
-        // Solução 2: Prioridade Heurística na Seleção do Radar Ativo
+        // Solução 2 & Desafio 1 (Propostas 1 & 3): Prioridade Heurística Cinemática e Viária
         // 1. Prioriza radares com velocidade real (> 0 km/h) sobre pontos puramente informativos (0 km/h)
-        // 2. Prioriza radares na trajetória frontal ("Na sua via" / "Frente") antes de transversais
+        // 2. Prioriza pelo Score Cinemático e Alinhamento Viário (penaliza radares de marginal quando em alta velocidade,
+        //    favorece radares com menor desvio lateral cross-track e alinhados com roadSpeedLimit)
         // 3. Menor distância física
         val sortedAlerts = matchingRadars.sortedWith(
             compareByDescending<NearbyRadar> { it.radar.speedLimit > 0 }
-                .thenBy { kotlin.math.abs(it.relativeAngleDeg) > 45f }
+                .thenByDescending { calculateKinematicScore(it, speedKmh, currentRoadSpeedLimit) }
                 .thenBy { it.distanceMeters }
         )
         _nearbyRadars.value = sortedAlerts
@@ -2961,6 +3224,15 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
                         if (isPositiveProjection) {
                             val relativeAngle = calculateRelativeBearing(heading, bearingToRadar)
+                            val crossTrackDist = calculateCrossTrackDistanceMeters(distanceMeters.toDouble(), relativeAngle)
+                            val alongTrackDist = calculateAlongTrackDistanceMeters(distanceMeters.toDouble(), relativeAngle)
+
+                            // Filtro de Corredor Viário Geral (Cross-Track)
+                            val maxCorridor = getMaxCorridorWidthMeters(distanceMeters.toDouble())
+                            if (speedKmh >= 5.0f && crossTrackDist > maxCorridor) {
+                                continue
+                            }
+
                             val isOverSpeed = radar.speedLimit > 0 && speedKmh > radar.speedLimit
                             val isAggressive = isOverSpeed && (timeToCollision <= aggressiveAlertTime.toDouble())
                             val alertDist = maxOf(minAlertDistance.toFloat(), (dynamicAlertLimit * speedMs).toFloat())
@@ -2971,7 +3243,9 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
                                     alertDistanceMeters = alertDist,
                                     timeToCollisionSec = timeToCollision.toDouble(),
                                     isAggressiveAlert = isAggressive,
-                                    relativeAngleDeg = relativeAngle
+                                    relativeAngleDeg = relativeAngle,
+                                    crossTrackDistanceMeters = crossTrackDist,
+                                    alongTrackDistanceMeters = alongTrackDist
                                 )
                             )
                         }
@@ -2982,7 +3256,7 @@ class RadarOverlayService : LifecycleService(), ViewModelStoreOwner, SavedStateR
 
         matchingRadars.sortedWith(
             compareByDescending<NearbyRadar> { it.radar.speedLimit > 0 }
-                .thenBy { kotlin.math.abs(it.relativeAngleDeg) > 45f }
+                .thenByDescending { calculateKinematicScore(it, speedKmh) }
                 .thenBy { it.distanceMeters }
         )
     }

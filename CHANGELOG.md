@@ -2,6 +2,29 @@
 
 Todas as alterações notáveis deste projeto serão documentadas neste arquivo.
 
+## [1.2.9] - 2026-11-13 (Build 11)
+
+### Adicionado
+- **Base de Dados de Limites de Velocidade das Vias (PR, SC, SP, MS):**
+  - Integração offline nativa no APK de mais de 850.000 pontos de limites de vias de São Paulo, Paraná, Santa Catarina e Mato Grosso do Sul (`road_speeds`).
+  - Carregamento inicial em background por streaming (lotes de 5.000 registros) consumindo menos de 2 MB de RAM, ideal para centrais multimídia automotivas.
+  - Sincronização e atualização sob demanda via GitHub diretamente pela interface do aplicativo.
+- **Heurística de Coerência Cinemática (Marginais vs. Vias Expressas):**
+  - Pontuação dinâmica (`calculateKinematicScore`) que diferencia pistas expressas de marginais paralelas com limites distintos.
+  - Penalização para radares de alta velocidade quando transitando em baixa velocidade (< 60 km/h) e vice-versa, com bônus de correspondência de limite da via.
+- **Filtro de Corredor por Deslocamento Lateral (Cross-Track Distance):**
+  - Cálculo trigonométrico de desvio ortogonal do vetor de movimento (`calculateCrossTrackDistanceMeters`).
+  - Descarte rigoroso de radares em vias transversais, marginais distantes ou cruzamentos fora da largura do corredor de tráfego.
+- **Correspondência Estrita de Rumo em Cruzamentos:**
+  - Descarte de radares ortogonais ou com ângulo divergente (> 30°) da trajetória real do veículo.
+- **Deduplicação Inteligente em Memória (Raio de 65m):**
+  - Fusão automática de múltiplos radares no mesmo ponto físico (`FIXED` + `TRAFFIC_LIGHT`), unificando direção e dando precedência a radares semafóricos com velocidade.
+- **Descarte e Banimento por Cluster (80m e 65m):**
+  - Ao descartar um radar no card flutuante, todos os pontos duplicados no raio de 80m são silenciados simultaneamente.
+  - Banimentos definitivos, marcações para revisão e strikes (3-strikes) propagam-se para todo o cluster físico (65m), eliminando o reaparecimento de clones.
+
+---
+
 ## [1.2.8] - 2026-11-11 (Build 10)
 
 ### Adicionado

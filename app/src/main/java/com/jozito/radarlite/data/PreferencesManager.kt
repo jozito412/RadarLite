@@ -422,6 +422,17 @@ class PreferencesManager(context: Context) {
     }
 
     /**
+     * Define o número de strikes acumulados para um radar (usado na sincronização de clusters).
+     */
+    fun setBanStrikes(radarId: Long, strikes: Int) {
+        if (strikes <= 0) {
+            clearBanStrikes(radarId)
+        } else {
+            prefs.edit().putInt("${KEY_RADAR_STRIKE_PREFIX}$radarId", strikes).apply()
+        }
+    }
+
+    /**
      * Limpa os strikes acumulados para o radar (chamado após o banimento definitivo no 3º strike ou banimento global).
      */
     fun clearBanStrikes(radarId: Long) {

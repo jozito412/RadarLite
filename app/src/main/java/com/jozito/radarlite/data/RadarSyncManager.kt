@@ -15,7 +15,8 @@ import java.net.URL
  */
 class RadarSyncManager(
     private val context: Context,
-    private val radarDao: RadarDao
+    private val radarDao: RadarDao,
+    private val roadSpeedDao: RoadSpeedDao? = null
 ) {
 
     companion object {
@@ -23,10 +24,18 @@ class RadarSyncManager(
 
         // URLs diretos (Raw) do GitHub contendo os CSVs consolidados dos 4 estados
         val STATE_CSV_URLS = listOf(
-            "https://raw.githubusercontent.com/Murkiriel/pardal/main/estados/PR/radares.csv",
-            "https://raw.githubusercontent.com/Murkiriel/pardal/main/estados/SC/radares.csv",
-            "https://raw.githubusercontent.com/Murkiriel/pardal/main/estados/SP/radares.csv",
-            "https://raw.githubusercontent.com/Murkiriel/pardal/main/estados/MS/radares.csv"
+            "https://raw.githubusercontent.com/murkiriel/pardal/main/estados/PR/radares.csv",
+            "https://raw.githubusercontent.com/murkiriel/pardal/main/estados/SC/radares.csv",
+            "https://raw.githubusercontent.com/murkiriel/pardal/main/estados/SP/radares.csv",
+            "https://raw.githubusercontent.com/murkiriel/pardal/main/estados/MS/radares.csv"
+        )
+
+        // URLs diretos (Raw) do GitHub contendo os CSVs de limites de velocidades das vias
+        val STATE_ROAD_SPEED_URLS = listOf(
+            "https://raw.githubusercontent.com/murkiriel/pardal/main/estados/PR/limites.csv",
+            "https://raw.githubusercontent.com/murkiriel/pardal/main/estados/SC/limites.csv",
+            "https://raw.githubusercontent.com/murkiriel/pardal/main/estados/SP/limites.csv",
+            "https://raw.githubusercontent.com/murkiriel/pardal/main/estados/MS/limites.csv"
         )
 
         /**
@@ -123,6 +132,92 @@ class RadarSyncManager(
             SyncResult(
                 isSuccess = false,
                 errorMessage = e.localizedMessage ?: "Erro de conexão ao baixar radares."
+            )
+        }
+    }
+
+    /**
+     * Sincroniza os limites de velocidades das vias diretamente do repositório murkiriel/pardal para os 4 estados.
+     * Realiza o download e inserção em streaming e por lotes de 5.000 pontos para não sobrecarregar a memória RAM.
+     *
+     * @param onProgress Callback para notificar o progresso de cada estado baixado.
+     */
+    suspend fun syncRoadSpeeds(
+        onProgress: (state: String, currentTotal: Int) -> Unit = { _, _ -> }
+    ): SyncResult = withContext(Dispatchers.IO) {
+        val dao = roadSpeedDao ?: return@withContext SyncResult(
+            isSuccess = false,
+            errorMessage = "DAO de velocidades das vias não disponível."
+        )
+
+        try {
+            val parser = RoadSpeedManager()
+            var totalSaved = 0
+
+            for (urlString in STATE_ROAD_SPEED_URLS) {
+                val state = urlString.split("/").let { it[it.size - 2] } // PR, SC, SP, MS
+                Log.d(TAG, "Iniciando download de limites de velocidade para $state ($urlString)...")
+
+                val url = URL(urlString)
+                val connection = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 15_000
+                    readTimeout = 40_000
+                    setRequestProperty("User-Agent", "RadarLite-Android")
+                }
+
+                try {
+                    val responseCode = connection.responseCode
+                    if (responseCode != HttpURLConnection.HTTP_OK) {
+                        throw java.io.IOException("Falha HTTP $responseCode ao baixar $urlString")
+                    }
+
+                    // Limpa os dados anteriores do estado específico antes de gravar os novos
+                    dao.deleteByState(state)
+
+                    BufferedReader(InputStreamReader(connection.inputStream, Charsets.UTF_8)).use { reader ->
+                        // Pula o cabeçalho
+                        reader.readLine()
+                        val batch = ArrayList<RoadSpeedEntity>(5000)
+                        var stateCount = 0
+                        var line: String?
+
+                        while (reader.readLine().also { line = it } != null) {
+                            val currentLine = line ?: continue
+                            parser.parseCsvLine(currentLine)?.let { point ->
+                                batch.add(point.toEntity(state = state))
+                                if (batch.size >= 5000) {
+                                    dao.insertAll(batch)
+                                    stateCount += batch.size
+                                    totalSaved += batch.size
+                                    batch.clear()
+                                }
+                            }
+                        }
+
+                        if (batch.isNotEmpty()) {
+                            dao.insertAll(batch)
+                            stateCount += batch.size
+                            totalSaved += batch.size
+                            batch.clear()
+                        }
+
+                        Log.d(TAG, "$stateCount pontos de limites salvos para $state.")
+                        onProgress(state, totalSaved)
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            }
+
+            val totalInDb = dao.getRoadSpeedCount()
+            Log.i(TAG, "Sincronização de velocidades concluída! Total no banco: $totalInDb")
+            SyncResult(isSuccess = true, totalRadarsSaved = totalInDb)
+        } catch (e: Exception) {
+            Log.e(TAG, "Falha na sincronização de velocidades das vias.", e)
+            SyncResult(
+                isSuccess = false,
+                errorMessage = e.localizedMessage ?: "Erro de conexão ao baixar limites de vias."
             )
         }
     }
